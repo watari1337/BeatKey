@@ -1,0 +1,15 @@
+#ifndef FIREBASECONFIG_H_EXAMPLE
+#define FIREBASECONFIG_H_EXAMPLE
+
+#include <QString>
+
+namespace FirebaseConfig {
+    /**
+     * @brief Шаблон адреса базы данных Firebase Realtime Database.
+     * Замените на URL вашего проекта из консоли Firebase (например:
+     * "https://your-project-id-default-rtdb.firebaseio.com")
+     */
+    inline const QString DEFAULT_DATABASE_URL = "https://YOUR-FIREBASE-PROJECT-default-rtdb.firebaseio.com";
+}
+
+#endif // FIREBASECONFIG_H_EXAMPLE

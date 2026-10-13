@@ -80,3 +80,9 @@ CMakeLists.txt.user*
 .rcc/
 .uic/
 /build*/
+
+# Secrets and local configurations
+firebaseconfig.h
+config.json
+local_scores.json
+
