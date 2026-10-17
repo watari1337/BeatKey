@@ -85,4 +85,8 @@ CMakeLists.txt.user*
 firebaseconfig.h
 config.json
 local_scores.json
+settings.ini
+release/
+debug/
+
 

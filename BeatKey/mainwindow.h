@@ -2,22 +2,48 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QStackedWidget>
 
-QT_BEGIN_NAMESPACE
-namespace Ui {
-class MainWindow;
-}
-QT_END_NAMESPACE
+class MainMenuWidget;
+class SettingsWidget;
 
+/**
+ * @brief MainWindow acts as the central router and coordinator between application screens.
+ *
+ * Utilizes QStackedWidget to decouple individual screens, allowing independent
+ * development by multiple programmers without git merge conflicts.
+ */
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    MainWindow(QWidget *parent = nullptr);
-    ~MainWindow();
+    enum ScreenIndex {
+        Screen_MainMenu = 0,
+        Screen_Settings = 1,
+        Screen_PlayPlaceholder = 2,
+        Screen_EditorPlaceholder = 3
+    };
+
+    explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow() override = default;
+
+protected:
+    void closeEvent(QCloseEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+
+private slots:
+    void switchToScreen(ScreenIndex index);
+    void handleExitRequest();
+    void updateFullscreenMode(bool fullscreen);
 
 private:
-    Ui::MainWindow *ui;
+    void setupUi();
+    QWidget* createPlaceholderScreen(const QString &title, const QString &description);
+
+    QStackedWidget *m_stackedWidget;
+    MainMenuWidget *m_mainMenuWidget;
+    SettingsWidget *m_settingsWidget;
 };
+
 #endif // MAINWINDOW_H
