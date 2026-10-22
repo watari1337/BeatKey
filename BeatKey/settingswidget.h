@@ -51,7 +51,6 @@ public:
 
 public slots:
     void loadFromSettingsManager();
-    void applyAndSave();
     void resetDefaults();
     void startAutoCalibration();
 
@@ -63,6 +62,7 @@ protected:
 
 private:
     void setupUi();
+    void saveCurrentSettings();
     QWidget* createSection(const QString &titleText, QWidget *contentWidget);
     QSlider* createVolumeSlider(int initialVal, QLabel *valLabel);
 
@@ -86,7 +86,6 @@ private:
 
     QComboBox *m_screenModeCombo;
 
-    QPushButton *m_saveBtn;
     QPushButton *m_resetBtn;
     QPushButton *m_backBtn;
 };

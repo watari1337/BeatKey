@@ -125,7 +125,6 @@ SettingsWidget::SettingsWidget(QWidget *parent)
     , m_offsetSpinBox(nullptr)
     , m_autoCalibBtn(nullptr)
     , m_screenModeCombo(nullptr)
-    , m_saveBtn(nullptr)
     , m_resetBtn(nullptr)
     , m_backBtn(nullptr)
 {
@@ -250,6 +249,13 @@ void SettingsWidget::setupUi()
         m_nickEdit->setMaxLength(20);
         m_nickEdit->setPlaceholderText(QStringLiteral("Введите ник (3-20 символов)"));
         m_nickEdit->setStyleSheet(Theme::lineEditStyle());
+        connect(m_nickEdit, &QLineEdit::editingFinished, this, [this]() {
+            QString nick = m_nickEdit->text().trimmed();
+            if (nick.length() >= 3) {
+                SettingsManager::instance().setNickname(nick);
+                SettingsManager::instance().saveSettings();
+            }
+        });
 
         layout->addWidget(label);
         layout->addWidget(m_nickEdit, 1);
@@ -266,12 +272,24 @@ void SettingsWidget::setupUi()
 
         m_masterValLabel = new QLabel(audioContent);
         m_masterSlider = createVolumeSlider(SettingsManager::DEFAULT_MASTER_VOLUME, m_masterValLabel);
+        connect(m_masterSlider, &QSlider::valueChanged, this, [](int v) {
+            SettingsManager::instance().setMasterVolume(v);
+            SettingsManager::instance().saveSettings();
+        });
 
         m_musicValLabel = new QLabel(audioContent);
         m_musicSlider = createVolumeSlider(SettingsManager::DEFAULT_MUSIC_VOLUME, m_musicValLabel);
+        connect(m_musicSlider, &QSlider::valueChanged, this, [](int v) {
+            SettingsManager::instance().setMusicVolume(v);
+            SettingsManager::instance().saveSettings();
+        });
 
         m_sfxValLabel = new QLabel(audioContent);
         m_sfxSlider = createVolumeSlider(SettingsManager::DEFAULT_SFX_VOLUME, m_sfxValLabel);
+        connect(m_sfxSlider, &QSlider::valueChanged, this, [](int v) {
+            SettingsManager::instance().setSfxVolume(v);
+            SettingsManager::instance().saveSettings();
+        });
 
         grid->addWidget(new QLabel(QStringLiteral("Общая громкость:"), audioContent), 0, 0);
         grid->addWidget(m_masterSlider, 0, 1);
@@ -299,11 +317,19 @@ void SettingsWidget::setupUi()
         auto *primBox = new QVBoxLayout();
         primBox->addWidget(new QLabel(QStringLiteral("Основная клавиша удара:"), controlsContent));
         m_primaryKeyBtn = new KeyBindButton(SettingsManager::DEFAULT_PRIMARY_KEY, controlsContent);
+        connect(m_primaryKeyBtn, &KeyBindButton::keyChanged, this, [](Qt::Key k) {
+            SettingsManager::instance().setPrimaryKey(k);
+            SettingsManager::instance().saveSettings();
+        });
         primBox->addWidget(m_primaryKeyBtn);
 
         auto *secBox = new QVBoxLayout();
         secBox->addWidget(new QLabel(QStringLiteral("Дополнительная клавиша:"), controlsContent));
         m_secondaryKeyBtn = new KeyBindButton(SettingsManager::DEFAULT_SECONDARY_KEY, controlsContent);
+        connect(m_secondaryKeyBtn, &KeyBindButton::keyChanged, this, [](Qt::Key k) {
+            SettingsManager::instance().setSecondaryKey(k);
+            SettingsManager::instance().saveSettings();
+        });
         secBox->addWidget(m_secondaryKeyBtn);
 
         layout->addLayout(primBox);
@@ -329,6 +355,10 @@ void SettingsWidget::setupUi()
         m_offsetSpinBox->setSuffix(QStringLiteral(" мс"));
         m_offsetSpinBox->setSingleStep(5);
         m_offsetSpinBox->setStyleSheet(Theme::spinBoxStyle());
+        connect(m_offsetSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [](int v) {
+            SettingsManager::instance().setAudioOffsetMs(v);
+            SettingsManager::instance().saveSettings();
+        });
 
         auto *minus10Btn = new QPushButton(QStringLiteral("-10 мс"), calibContent);
         auto *plus10Btn = new QPushButton(QStringLiteral("+10 мс"), calibContent);
@@ -385,12 +415,12 @@ void SettingsWidget::setupUi()
         m_screenModeCombo->addItem(QStringLiteral("Оконный режим (1280×720)"), false);
         m_screenModeCombo->addItem(QStringLiteral("Полноэкранный режим (Fullscreen)"), true);
 
-        // При выборе режима сразу переключаем экран для мгновенной обратной связи,
-        // а при нажатии «Сохранить настройки» фиксируем в settings.ini
+        // При выборе режима сразу переключаем экран и сохраняем настройку
         connect(m_screenModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
                 this, [this](int index) {
             bool isFull = m_screenModeCombo->itemData(index).toBool();
             SettingsManager::instance().setFullscreen(isFull);
+            SettingsManager::instance().saveSettings();
         });
 
         layout->addWidget(label);
@@ -403,7 +433,7 @@ void SettingsWidget::setupUi()
     scrollArea->setWidget(contentWidget);
     mainLayout->addWidget(scrollArea, 1);
 
-    // Bottom Action Bar: Reset, Save
+    // Bottom Action Bar: Reset to defaults
     auto *bottomLayout = new QHBoxLayout();
     bottomLayout->setSpacing(16);
 
@@ -412,14 +442,8 @@ void SettingsWidget::setupUi()
     m_resetBtn->setStyleSheet(Theme::secondaryButtonStyle());
     connect(m_resetBtn, &QPushButton::clicked, this, &SettingsWidget::resetDefaults);
 
-    m_saveBtn = new QPushButton(QStringLiteral("✓ Сохранить настройки"), this);
-    m_saveBtn->setCursor(Qt::PointingHandCursor);
-    m_saveBtn->setStyleSheet(Theme::successButtonStyle());
-    connect(m_saveBtn, &QPushButton::clicked, this, &SettingsWidget::applyAndSave);
-
     bottomLayout->addWidget(m_resetBtn);
     bottomLayout->addStretch(1);
-    bottomLayout->addWidget(m_saveBtn);
 
     mainLayout->addLayout(bottomLayout);
 }
@@ -428,46 +452,38 @@ void SettingsWidget::loadFromSettingsManager()
 {
     const auto &mgr = SettingsManager::instance();
 
-    if (m_nickEdit) m_nickEdit->setText(mgr.nickname());
-    if (m_masterSlider) m_masterSlider->setValue(mgr.masterVolume());
-    if (m_musicSlider) m_musicSlider->setValue(mgr.musicVolume());
-    if (m_sfxSlider) m_sfxSlider->setValue(mgr.sfxVolume());
-    if (m_primaryKeyBtn) m_primaryKeyBtn->setCurrentKey(mgr.primaryKey());
-    if (m_secondaryKeyBtn) m_secondaryKeyBtn->setCurrentKey(mgr.secondaryKey());
-    if (m_offsetSpinBox) m_offsetSpinBox->setValue(mgr.audioOffsetMs());
+    if (m_nickEdit) {
+        const QSignalBlocker blocker(m_nickEdit);
+        m_nickEdit->setText(mgr.nickname());
+    }
+    if (m_masterSlider) {
+        const QSignalBlocker blocker(m_masterSlider);
+        m_masterSlider->setValue(mgr.masterVolume());
+    }
+    if (m_musicSlider) {
+        const QSignalBlocker blocker(m_musicSlider);
+        m_musicSlider->setValue(mgr.musicVolume());
+    }
+    if (m_sfxSlider) {
+        const QSignalBlocker blocker(m_sfxSlider);
+        m_sfxSlider->setValue(mgr.sfxVolume());
+    }
+    if (m_primaryKeyBtn) {
+        const QSignalBlocker blocker(m_primaryKeyBtn);
+        m_primaryKeyBtn->setCurrentKey(mgr.primaryKey());
+    }
+    if (m_secondaryKeyBtn) {
+        const QSignalBlocker blocker(m_secondaryKeyBtn);
+        m_secondaryKeyBtn->setCurrentKey(mgr.secondaryKey());
+    }
+    if (m_offsetSpinBox) {
+        const QSignalBlocker blocker(m_offsetSpinBox);
+        m_offsetSpinBox->setValue(mgr.audioOffsetMs());
+    }
     if (m_screenModeCombo) {
-        m_screenModeCombo->blockSignals(true);
+        const QSignalBlocker blocker(m_screenModeCombo);
         m_screenModeCombo->setCurrentIndex(mgr.isFullscreen() ? 1 : 0);
-        m_screenModeCombo->blockSignals(false);
     }
-}
-
-void SettingsWidget::applyAndSave()
-{
-    auto &mgr = SettingsManager::instance();
-
-    QString nick = m_nickEdit->text().trimmed();
-    if (nick.length() < 3) {
-        QMessageBox::warning(this, QStringLiteral("Ошибка ввода"),
-                             QStringLiteral("Никнейм должен содержать не менее 3 символов."));
-        return;
-    }
-
-    mgr.setNickname(nick);
-    mgr.setMasterVolume(m_masterSlider->value());
-    mgr.setMusicVolume(m_musicSlider->value());
-    mgr.setSfxVolume(m_sfxSlider->value());
-    mgr.setPrimaryKey(m_primaryKeyBtn->currentKey());
-    mgr.setSecondaryKey(m_secondaryKeyBtn->currentKey());
-    mgr.setAudioOffsetMs(m_offsetSpinBox->value());
-    if (m_screenModeCombo) {
-        mgr.setFullscreen(m_screenModeCombo->currentData().toBool());
-    }
-
-    mgr.saveSettings();
-
-    QMessageBox::information(this, QStringLiteral("Настройки сохранены"),
-                             QStringLiteral("Конфигурация успешно сохранена в файл settings.ini."));
 }
 
 void SettingsWidget::resetDefaults()
