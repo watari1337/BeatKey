@@ -1,5 +1,7 @@
 #include "mainmenuwidget.h"
 #include "settingsmanager.h"
+#include "theme.h"
+#include "audiomanager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -19,6 +21,9 @@ MainMenuWidget::MainMenuWidget(QWidget *parent)
 
     connect(&SettingsManager::instance(), &SettingsManager::nicknameChanged,
             this, &MainMenuWidget::refreshProfileInfo);
+
+    // Запускаем фоновую музыку главного меню
+    AudioManager::instance().playMenuMusic();
 }
 
 void MainMenuWidget::paintEvent(QPaintEvent *event)
@@ -47,28 +52,7 @@ QPushButton* MainMenuWidget::createMenuButton(const QString &text, const QString
     auto *btn = new QPushButton(text, this);
     btn->setMinimumSize(320, 56);
     btn->setCursor(Qt::PointingHandCursor);
-    btn->setStyleSheet(QStringLiteral(
-        "QPushButton {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(88, 38, 175, 210), stop:1 rgba(142, 68, 173, 210));"
-        "  color: #ffffff;"
-        "  border: 2px solid #a259ff;"
-        "  border-radius: 12px;"
-        "  font-family: 'Segoe UI', 'Arial', sans-serif;"
-        "  font-size: 18px;"
-        "  font-weight: bold;"
-        "  letter-spacing: 2px;"
-        "  text-align: center;"
-        "  padding: 8px 16px;"
-        "}"
-        "QPushButton:hover {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(120, 55, 235, 240), stop:1 rgba(175, 85, 215, 240));"
-        "  border: 2px solid #d580ff;"
-        "}"
-        "QPushButton:pressed {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(65, 25, 135, 250), stop:1 rgba(110, 48, 140, 250));"
-        "  border: 2px solid #a259ff;"
-        "}"
-    ));
+    btn->setStyleSheet(Theme::menuButtonStyle());
 
     auto *shadow = new QGraphicsDropShadowEffect(btn);
     shadow->setBlurRadius(15);
@@ -132,33 +116,24 @@ void MainMenuWidget::setupUi()
     auto *btnExit = createMenuButton(QStringLiteral("ВЫХОД"));
 
     // Danger accent for exit button hover
-    btnExit->setStyleSheet(QStringLiteral(
-        "QPushButton {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(80, 25, 45, 210), stop:1 rgba(120, 35, 65, 210));"
-        "  color: #ffffff;"
-        "  border: 2px solid #cc4466;"
-        "  border-radius: 12px;"
-        "  font-family: 'Segoe UI', 'Arial', sans-serif;"
-        "  font-size: 18px;"
-        "  font-weight: bold;"
-        "  letter-spacing: 2px;"
-        "  text-align: center;"
-        "  padding: 8px 16px;"
-        "}"
-        "QPushButton:hover {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(140, 40, 70, 240), stop:1 rgba(190, 50, 90, 240));"
-        "  border: 2px solid #ff5577;"
-        "}"
-        "QPushButton:pressed {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(70, 20, 35, 250), stop:1 rgba(100, 30, 55, 250));"
-        "  border: 2px solid #cc4466;"
-        "}"
-    ));
+    btnExit->setStyleSheet(Theme::menuExitButtonStyle());
 
-    connect(btnPlay, &QPushButton::clicked, this, &MainMenuWidget::playRequested);
-    connect(btnEditor, &QPushButton::clicked, this, &MainMenuWidget::editorRequested);
-    connect(btnSettings, &QPushButton::clicked, this, &MainMenuWidget::settingsRequested);
-    connect(btnExit, &QPushButton::clicked, this, &MainMenuWidget::exitRequested);
+    connect(btnPlay, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        emit playRequested();
+    });
+    connect(btnEditor, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        emit editorRequested();
+    });
+    connect(btnSettings, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        emit settingsRequested();
+    });
+    connect(btnExit, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        emit exitRequested();
+    });
 
     buttonCenterContainer->addWidget(btnPlay);
     buttonCenterContainer->addWidget(btnEditor);

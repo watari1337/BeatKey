@@ -3,5 +3,16 @@
         <file>assets/images/background.jpg</file>
         <file>assets/images/logo.png</file>
         <file>assets/images/icon_bk.png</file>
+        <file>assets/audio/hit.wav</file>
+        <file>assets/audio/miss.wav</file>
+        <file>assets/audio/combo_break.wav</file>
+        <file>assets/audio/metronome.wav</file>
+        <file>assets/audio/countdown.wav</file>
+        <file>assets/audio/fail.wav</file>
+        <file>assets/audio/clear.wav</file>
+        <file>assets/audio/button_click.wav</file>
+        <file>assets/audio/button_hover.wav</file>
+        <file>assets/audio/menu_theme.mp3</file>
+        <file>assets/audio/results_theme.mp3</file>
     </qresource>
 </RCC>

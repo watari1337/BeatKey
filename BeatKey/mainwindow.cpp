@@ -1,8 +1,11 @@
 #include "mainwindow.h"
 #include "mainmenuwidget.h"
 #include "settingswidget.h"
+#include "songselectwidget.h"
 #include "exitdialog.h"
 #include "settingsmanager.h"
+#include "audiomanager.h"
+#include "theme.h"
 
 #include <QVBoxLayout>
 #include <QLabel>
@@ -16,6 +19,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_stackedWidget(new QStackedWidget(this))
     , m_mainMenuWidget(nullptr)
     , m_settingsWidget(nullptr)
+    , m_songSelectWidget(nullptr)
 {
     setWindowTitle(QStringLiteral("BeatKey - Rhythm Game & Beatmap Studio"));
 
@@ -40,12 +44,7 @@ void MainWindow::setupUi()
 
     m_mainMenuWidget = new MainMenuWidget(this);
     m_settingsWidget = new SettingsWidget(this);
-
-    QWidget *playPlaceholder = createPlaceholderScreen(
-        QStringLiteral("Режим игры (Song Select)"),
-        QStringLiteral("Модуль выбора трека, воспроизведения карты и ритм-геймплея.\n"
-                       "Архитектурно изолирован для разработки вторым разработчиком.")
-    );
+    m_songSelectWidget = new SongSelectWidget(this);
 
     QWidget *editorPlaceholder = createPlaceholderScreen(
         QStringLiteral("Редактор карт (Beatmap Editor)"),
@@ -55,12 +54,12 @@ void MainWindow::setupUi()
 
     m_stackedWidget->addWidget(m_mainMenuWidget);       // Index 0
     m_stackedWidget->addWidget(m_settingsWidget);       // Index 1
-    m_stackedWidget->addWidget(playPlaceholder);        // Index 2
+    m_stackedWidget->addWidget(m_songSelectWidget);     // Index 2
     m_stackedWidget->addWidget(editorPlaceholder);      // Index 3
 
     // Main menu navigation
     connect(m_mainMenuWidget, &MainMenuWidget::playRequested, this, [this]() {
-        switchToScreen(Screen_PlayPlaceholder);
+        switchToScreen(Screen_SongSelect);
     });
     connect(m_mainMenuWidget, &MainMenuWidget::editorRequested, this, [this]() {
         switchToScreen(Screen_EditorPlaceholder);
@@ -74,6 +73,15 @@ void MainWindow::setupUi()
     // Settings back navigation
     connect(m_settingsWidget, &SettingsWidget::backRequested, this, [this]() {
         switchToScreen(Screen_MainMenu);
+    });
+
+    // Song select navigation
+    connect(m_songSelectWidget, &SongSelectWidget::backRequested, this, [this]() {
+        switchToScreen(Screen_MainMenu);
+    });
+    connect(m_songSelectWidget, &SongSelectWidget::playMapRequested, this, [](const Beatmap &map) {
+        // Will launch gameplay screen when gameplay module is implemented
+        Q_UNUSED(map);
     });
 
     m_stackedWidget->setCurrentIndex(Screen_MainMenu);
@@ -93,19 +101,7 @@ QWidget* MainWindow::createPlaceholderScreen(const QString &title, const QString
 
     auto *backBtn = new QPushButton(QStringLiteral("← Главное меню"), widget);
     backBtn->setCursor(Qt::PointingHandCursor);
-    backBtn->setStyleSheet(QStringLiteral(
-        "QPushButton {"
-        "  background: #2a1f42;"
-        "  color: #bb9af7;"
-        "  border: 1px solid #65439c;"
-        "  border-radius: 8px;"
-        "  padding: 8px 18px;"
-        "  font-size: 14px;"
-        "  font-weight: bold;"
-        "  max-width: 180px;"
-        "}"
-        "QPushButton:hover { background: #3d2a61; border: 1px solid #a259ff; color: #ffffff; }"
-    ));
+    backBtn->setStyleSheet(Theme::secondaryButtonStyle());
     connect(backBtn, &QPushButton::clicked, this, [this]() {
         switchToScreen(Screen_MainMenu);
     });
@@ -148,6 +144,7 @@ void MainWindow::updateFullscreenMode(bool fullscreen)
         showFullScreen();
     } else {
         showNormal();
+        resize(1280, 720);
     }
 }
 
@@ -172,6 +169,9 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
         if (m_stackedWidget->currentIndex() != Screen_MainMenu) {
+            if (m_stackedWidget->currentIndex() == Screen_SongSelect) {
+                AudioManager::instance().playMenuMusic();
+            }
             switchToScreen(Screen_MainMenu);
             event->accept();
             return;
