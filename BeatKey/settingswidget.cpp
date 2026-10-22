@@ -1,5 +1,6 @@
 #include "settingswidget.h"
 #include "settingsmanager.h"
+#include "theme.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -8,6 +9,7 @@
 #include <QKeyEvent>
 #include <QMessageBox>
 #include <QGraphicsDropShadowEffect>
+#include <QPainter>
 
 // ============================================================================
 // KeyBindButton Implementation
@@ -122,23 +124,27 @@ SettingsWidget::SettingsWidget(QWidget *parent)
     , m_secondaryKeyBtn(nullptr)
     , m_offsetSpinBox(nullptr)
     , m_autoCalibBtn(nullptr)
-    , m_fullscreenCheck(nullptr)
+    , m_screenModeCombo(nullptr)
     , m_saveBtn(nullptr)
     , m_resetBtn(nullptr)
     , m_backBtn(nullptr)
 {
+    setAttribute(Qt::WA_StyledBackground, true);
     setupUi();
     loadFromSettingsManager();
+}
+
+void SettingsWidget::paintEvent(QPaintEvent *event)
+{
+    Q_UNUSED(event);
+    QPainter painter(this);
+    Theme::paintWindowBackground(&painter, rect());
 }
 
 QWidget* SettingsWidget::createSection(const QString &titleText, QWidget *contentWidget)
 {
     auto *box = new QWidget(this);
-    box->setStyleSheet(QStringLiteral(
-        "background-color: rgba(30, 22, 50, 180);"
-        "border: 1px solid #5a388f;"
-        "border-radius: 12px;"
-    ));
+    box->setStyleSheet(Theme::sectionBoxStyle());
 
     auto *layout = new QVBoxLayout(box);
     layout->setContentsMargins(20, 16, 20, 16);
@@ -165,25 +171,7 @@ QSlider* SettingsWidget::createVolumeSlider(int initialVal, QLabel *valLabel)
     auto *slider = new QSlider(Qt::Horizontal, this);
     slider->setRange(0, 100);
     slider->setValue(initialVal);
-    slider->setStyleSheet(QStringLiteral(
-        "QSlider::groove:horizontal {"
-        "  height: 8px;"
-        "  background: #251b3d;"
-        "  border-radius: 4px;"
-        "}"
-        "QSlider::sub-page:horizontal {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7d44cf, stop:1 #a259ff);"
-        "  border-radius: 4px;"
-        "}"
-        "QSlider::handle:horizontal {"
-        "  background: #ffffff;"
-        "  border: 2px solid #a259ff;"
-        "  width: 18px;"
-        "  margin-top: -5px;"
-        "  margin-bottom: -5px;"
-        "  border-radius: 9px;"
-        "}"
-    ));
+    slider->setStyleSheet(Theme::sliderStyle());
 
     valLabel->setText(QString::number(initialVal) + QStringLiteral("%"));
     valLabel->setStyleSheet(QStringLiteral("color: #ffffff; font-weight: bold; min-width: 45px; border:none; background:transparent;"));
@@ -217,22 +205,7 @@ void SettingsWidget::setupUi()
 
     m_backBtn = new QPushButton(QStringLiteral("← Главное меню"), this);
     m_backBtn->setCursor(Qt::PointingHandCursor);
-    m_backBtn->setStyleSheet(QStringLiteral(
-        "QPushButton {"
-        "  background: #2a1f42;"
-        "  color: #bb9af7;"
-        "  border: 1px solid #65439c;"
-        "  border-radius: 8px;"
-        "  padding: 8px 18px;"
-        "  font-size: 14px;"
-        "  font-weight: bold;"
-        "}"
-        "QPushButton:hover {"
-        "  background: #3d2a61;"
-        "  border: 1px solid #a259ff;"
-        "  color: #ffffff;"
-        "}"
-    ));
+    m_backBtn->setStyleSheet(Theme::secondaryButtonStyle());
     connect(m_backBtn, &QPushButton::clicked, this, &SettingsWidget::backRequested);
 
     auto *titleLabel = new QLabel(QStringLiteral("НАСТРОЙКИ"), this);
@@ -254,20 +227,9 @@ void SettingsWidget::setupUi()
     // Scrollable area for settings cards
     auto *scrollArea = new QScrollArea(this);
     scrollArea->setWidgetResizable(true);
-    scrollArea->setStyleSheet(QStringLiteral(
-        "QScrollArea { border: none; background: transparent; }"
-        "QScrollBar:vertical {"
-        "  border: none;"
-        "  background: #18112c;"
-        "  width: 10px;"
-        "  margin: 0px;"
-        "}"
-        "QScrollBar::handle:vertical {"
-        "  background: #553388;"
-        "  min-height: 20px;"
-        "  border-radius: 5px;"
-        "}"
-    ));
+    scrollArea->viewport()->setAutoFillBackground(false);
+    scrollArea->viewport()->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
+    scrollArea->setStyleSheet(Theme::scrollAreaStyle());
 
     auto *contentWidget = new QWidget(scrollArea);
     contentWidget->setStyleSheet(QStringLiteral("background: transparent;"));
@@ -287,19 +249,7 @@ void SettingsWidget::setupUi()
         m_nickEdit = new QLineEdit(playerContent);
         m_nickEdit->setMaxLength(20);
         m_nickEdit->setPlaceholderText(QStringLiteral("Введите ник (3-20 символов)"));
-        m_nickEdit->setStyleSheet(QStringLiteral(
-            "QLineEdit {"
-            "  background: #1c1430;"
-            "  color: #ffffff;"
-            "  border: 1px solid #7d44cf;"
-            "  border-radius: 8px;"
-            "  padding: 8px 12px;"
-            "  font-size: 14px;"
-            "}"
-            "QLineEdit:focus {"
-            "  border: 1px solid #a259ff;"
-            "}"
-        ));
+        m_nickEdit->setStyleSheet(Theme::lineEditStyle());
 
         layout->addWidget(label);
         layout->addWidget(m_nickEdit, 1);
@@ -378,18 +328,7 @@ void SettingsWidget::setupUi()
         m_offsetSpinBox->setRange(SettingsManager::MIN_AUDIO_OFFSET_MS, SettingsManager::MAX_AUDIO_OFFSET_MS);
         m_offsetSpinBox->setSuffix(QStringLiteral(" мс"));
         m_offsetSpinBox->setSingleStep(5);
-        m_offsetSpinBox->setStyleSheet(QStringLiteral(
-            "QSpinBox {"
-            "  background: #1c1430;"
-            "  color: #ffffff;"
-            "  border: 1px solid #7d44cf;"
-            "  border-radius: 6px;"
-            "  padding: 6px;"
-            "  font-size: 14px;"
-            "  font-weight: bold;"
-            "  min-width: 90px;"
-            "}"
-        ));
+        m_offsetSpinBox->setStyleSheet(Theme::spinBoxStyle());
 
         auto *minus10Btn = new QPushButton(QStringLiteral("-10 мс"), calibContent);
         auto *plus10Btn = new QPushButton(QStringLiteral("+10 мс"), calibContent);
@@ -421,20 +360,7 @@ void SettingsWidget::setupUi()
 
         m_autoCalibBtn = new QPushButton(QStringLiteral("⚡ Запустить автокалибровку задержки (10 ударов)"), calibContent);
         m_autoCalibBtn->setCursor(Qt::PointingHandCursor);
-        m_autoCalibBtn->setStyleSheet(QStringLiteral(
-            "QPushButton {"
-            "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #3c1e70, stop:1 #5a289b);"
-            "  color: #ffffff;"
-            "  border: 1px solid #9154f3;"
-            "  border-radius: 8px;"
-            "  padding: 10px 18px;"
-            "  font-size: 13px;"
-            "  font-weight: bold;"
-            "}"
-            "QPushButton:hover {"
-            "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4f2794, stop:1 #7234c2);"
-            "}"
-        ));
+        m_autoCalibBtn->setStyleSheet(Theme::primaryButtonStyle());
         connect(m_autoCalibBtn, &QPushButton::clicked, this, &SettingsWidget::startAutoCalibration);
 
         vbox->addLayout(hbox);
@@ -443,33 +369,35 @@ void SettingsWidget::setupUi()
         contentLayout->addWidget(createSection(QStringLiteral("⏱ Синхронизация и калибровка"), calibContent));
     }
 
-    // 5. Video Section
+    // 5. Video Section (2 режима: оконный и полноэкранный)
     {
         auto *videoContent = new QWidget(contentWidget);
         videoContent->setStyleSheet(QStringLiteral("border:none; background:transparent;"));
         auto *layout = new QHBoxLayout(videoContent);
         layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(20);
 
-        m_fullscreenCheck = new QCheckBox(QStringLiteral("Полноэкранный режим (Fullscreen)"), videoContent);
-        m_fullscreenCheck->setStyleSheet(QStringLiteral(
-            "QCheckBox { color: #ffffff; font-size: 14px; }"
-            "QCheckBox::indicator {"
-            "  width: 18px;"
-            "  height: 18px;"
-            "  border: 2px solid #7d44cf;"
-            "  border-radius: 4px;"
-            "  background: #1c1430;"
-            "}"
-            "QCheckBox::indicator:checked {"
-            "  background: #a259ff;"
-            "  border: 2px solid #ffffff;"
-            "}"
-        ));
+        auto *label = new QLabel(QStringLiteral("Режим отображения:"), videoContent);
+        label->setStyleSheet(QStringLiteral("font-size: 14px;"));
 
-        layout->addWidget(m_fullscreenCheck);
+        m_screenModeCombo = new QComboBox(videoContent);
+        m_screenModeCombo->setStyleSheet(Theme::comboBoxStyle());
+        m_screenModeCombo->addItem(QStringLiteral("Оконный режим (1280×720)"), false);
+        m_screenModeCombo->addItem(QStringLiteral("Полноэкранный режим (Fullscreen)"), true);
+
+        // При выборе режима сразу переключаем экран для мгновенной обратной связи,
+        // а при нажатии «Сохранить настройки» фиксируем в settings.ini
+        connect(m_screenModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                this, [this](int index) {
+            bool isFull = m_screenModeCombo->itemData(index).toBool();
+            SettingsManager::instance().setFullscreen(isFull);
+        });
+
+        layout->addWidget(label);
+        layout->addWidget(m_screenModeCombo);
         layout->addStretch(1);
 
-        contentLayout->addWidget(createSection(QStringLiteral("🖥 Отображение"), videoContent));
+        contentLayout->addWidget(createSection(QStringLiteral("🖥 Отображение экрана"), videoContent));
     }
 
     scrollArea->setWidget(contentWidget);
@@ -481,40 +409,12 @@ void SettingsWidget::setupUi()
 
     m_resetBtn = new QPushButton(QStringLiteral("Сбросить по умолчанию"), this);
     m_resetBtn->setCursor(Qt::PointingHandCursor);
-    m_resetBtn->setStyleSheet(QStringLiteral(
-        "QPushButton {"
-        "  background: #2a1f42;"
-        "  color: #dd8888;"
-        "  border: 1px solid #774455;"
-        "  border-radius: 8px;"
-        "  padding: 10px 20px;"
-        "  font-size: 14px;"
-        "  font-weight: bold;"
-        "}"
-        "QPushButton:hover {"
-        "  background: #442535;"
-        "  border: 1px solid #aa5566;"
-        "  color: #ffffff;"
-        "}"
-    ));
+    m_resetBtn->setStyleSheet(Theme::secondaryButtonStyle());
     connect(m_resetBtn, &QPushButton::clicked, this, &SettingsWidget::resetDefaults);
 
     m_saveBtn = new QPushButton(QStringLiteral("✓ Сохранить настройки"), this);
     m_saveBtn->setCursor(Qt::PointingHandCursor);
-    m_saveBtn->setStyleSheet(QStringLiteral(
-        "QPushButton {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #1b8a5a, stop:1 #27ae60);"
-        "  color: #ffffff;"
-        "  border: 1px solid #2ecc71;"
-        "  border-radius: 8px;"
-        "  padding: 10px 26px;"
-        "  font-size: 14px;"
-        "  font-weight: bold;"
-        "}"
-        "QPushButton:hover {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #23a86f, stop:1 #2ecc71);"
-        "}"
-    ));
+    m_saveBtn->setStyleSheet(Theme::successButtonStyle());
     connect(m_saveBtn, &QPushButton::clicked, this, &SettingsWidget::applyAndSave);
 
     bottomLayout->addWidget(m_resetBtn);
@@ -535,7 +435,11 @@ void SettingsWidget::loadFromSettingsManager()
     if (m_primaryKeyBtn) m_primaryKeyBtn->setCurrentKey(mgr.primaryKey());
     if (m_secondaryKeyBtn) m_secondaryKeyBtn->setCurrentKey(mgr.secondaryKey());
     if (m_offsetSpinBox) m_offsetSpinBox->setValue(mgr.audioOffsetMs());
-    if (m_fullscreenCheck) m_fullscreenCheck->setChecked(mgr.isFullscreen());
+    if (m_screenModeCombo) {
+        m_screenModeCombo->blockSignals(true);
+        m_screenModeCombo->setCurrentIndex(mgr.isFullscreen() ? 1 : 0);
+        m_screenModeCombo->blockSignals(false);
+    }
 }
 
 void SettingsWidget::applyAndSave()
@@ -556,7 +460,9 @@ void SettingsWidget::applyAndSave()
     mgr.setPrimaryKey(m_primaryKeyBtn->currentKey());
     mgr.setSecondaryKey(m_secondaryKeyBtn->currentKey());
     mgr.setAudioOffsetMs(m_offsetSpinBox->value());
-    mgr.setFullscreen(m_fullscreenCheck->isChecked());
+    if (m_screenModeCombo) {
+        mgr.setFullscreen(m_screenModeCombo->currentData().toBool());
+    }
 
     mgr.saveSettings();
 

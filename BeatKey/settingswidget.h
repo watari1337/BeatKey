@@ -6,8 +6,8 @@
 #include <QSlider>
 #include <QLabel>
 #include <QPushButton>
-#include <QCheckBox>
 #include <QSpinBox>
+#include <QComboBox>
 
 /**
  * @brief KeyBindButton is an interactive button that captures key presses for binding controls.
@@ -58,6 +58,9 @@ public slots:
 signals:
     void backRequested();
 
+protected:
+    void paintEvent(QPaintEvent *event) override;
+
 private:
     void setupUi();
     QWidget* createSection(const QString &titleText, QWidget *contentWidget);
@@ -81,7 +84,7 @@ private:
     QSpinBox *m_offsetSpinBox;
     QPushButton *m_autoCalibBtn;
 
-    QCheckBox *m_fullscreenCheck;
+    QComboBox *m_screenModeCombo;
 
     QPushButton *m_saveBtn;
     QPushButton *m_resetBtn;

@@ -4,6 +4,7 @@
 #include <QDialog>
 #include <QLabel>
 #include <QPushButton>
+#include <QShowEvent>
 
 /**
  * @brief ExitDialog provides a styled confirmation before quitting the game.
@@ -15,6 +16,9 @@ class ExitDialog : public QDialog
 public:
     explicit ExitDialog(QWidget *parent = nullptr);
     ~ExitDialog() override = default;
+
+protected:
+    void showEvent(QShowEvent *event) override;
 
 private:
     void setupUi();

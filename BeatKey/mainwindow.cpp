@@ -3,6 +3,7 @@
 #include "settingswidget.h"
 #include "exitdialog.h"
 #include "settingsmanager.h"
+#include "theme.h"
 
 #include <QVBoxLayout>
 #include <QLabel>
@@ -93,19 +94,7 @@ QWidget* MainWindow::createPlaceholderScreen(const QString &title, const QString
 
     auto *backBtn = new QPushButton(QStringLiteral("← Главное меню"), widget);
     backBtn->setCursor(Qt::PointingHandCursor);
-    backBtn->setStyleSheet(QStringLiteral(
-        "QPushButton {"
-        "  background: #2a1f42;"
-        "  color: #bb9af7;"
-        "  border: 1px solid #65439c;"
-        "  border-radius: 8px;"
-        "  padding: 8px 18px;"
-        "  font-size: 14px;"
-        "  font-weight: bold;"
-        "  max-width: 180px;"
-        "}"
-        "QPushButton:hover { background: #3d2a61; border: 1px solid #a259ff; color: #ffffff; }"
-    ));
+    backBtn->setStyleSheet(Theme::secondaryButtonStyle());
     connect(backBtn, &QPushButton::clicked, this, [this]() {
         switchToScreen(Screen_MainMenu);
     });
@@ -148,6 +137,7 @@ void MainWindow::updateFullscreenMode(bool fullscreen)
         showFullScreen();
     } else {
         showNormal();
+        resize(1280, 720);
     }
 }
 

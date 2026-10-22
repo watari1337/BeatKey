@@ -12,7 +12,8 @@ SOURCES += \
     settingsmanager.cpp \
     mainmenuwidget.cpp \
     settingswidget.cpp \
-    exitdialog.cpp
+    exitdialog.cpp \
+    theme.cpp
 
 HEADERS += \
     mainwindow.h \
@@ -22,7 +23,8 @@ HEADERS += \
     settingsmanager.h \
     mainmenuwidget.h \
     settingswidget.h \
-    exitdialog.h
+    exitdialog.h \
+    theme.h
 
 RESOURCES += \
     resources.qrc
