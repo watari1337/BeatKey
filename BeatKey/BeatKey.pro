@@ -1,4 +1,4 @@
-QT       += core gui network widgets multimedia
+QT       += core core-private gui network widgets multimedia
 
 CONFIG += c++17
 
@@ -14,7 +14,10 @@ SOURCES += \
     settingswidget.cpp \
     exitdialog.cpp \
     theme.cpp \
-    audiomanager.cpp
+    audiomanager.cpp \
+    beatmap.cpp \
+    beatmapmanager.cpp \
+    songselectwidget.cpp
 
 HEADERS += \
     mainwindow.h \
@@ -26,7 +29,10 @@ HEADERS += \
     settingswidget.h \
     exitdialog.h \
     theme.h \
-    audiomanager.h
+    audiomanager.h \
+    beatmap.h \
+    beatmapmanager.h \
+    songselectwidget.h
 
 RESOURCES += \
     resources.qrc

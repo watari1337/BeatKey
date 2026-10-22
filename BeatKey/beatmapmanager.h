@@ -1,0 +1,75 @@
+#ifndef BEATMAPMANAGER_H
+#define BEATMAPMANAGER_H
+
+#include <QObject>
+#include <QString>
+#include <QVector>
+#include <QStringList>
+
+#include "beatmap.h"
+
+/**
+ * @brief BeatmapManager handles reading, validating, and exporting .bkey packages.
+ *
+ * Implements batch loading from directories, ZIP unpacking to local cache,
+ * and SHA-256 integrity validation per TZ 4.10.
+ */
+class BeatmapManager : public QObject
+{
+    Q_OBJECT
+
+public:
+    static BeatmapManager& instance();
+
+    // ========================================================================
+    // Loading & Batch Directory Scan
+    // ========================================================================
+    /**
+     * @brief Loads all valid .bkey packages from a user-specified directory.
+     * @param dirPath Path to the target folder.
+     * @param errors Optional list to accumulate human-readable error messages for corrupt files.
+     * @return List of parsed and validated Beatmap objects.
+     */
+    QVector<Beatmap> loadAllFromDirectory(const QString &dirPath, QStringList *errors = nullptr);
+
+    /**
+     * @brief Loads and validates a single .bkey package.
+     * @param bkeyFilePath Full path to .bkey file.
+     * @param error Optional pointer to receive error description on failure.
+     * @return Beatmap object (check .isValid before using).
+     */
+    Beatmap loadFromFile(const QString &bkeyFilePath, QString *error = nullptr);
+
+    // ========================================================================
+    // Package Export (for Beatmap Editor)
+    // ========================================================================
+    /**
+     * @brief Packages map.json, mp3 audio, and cover image into a .bkey container.
+     */
+    bool exportToFile(const QString &outBkeyPath,
+                      Beatmap &beatmap,
+                      const QString &audioSourceMp3Path,
+                      const QString &coverImagePath,
+                      QString *error = nullptr);
+
+    // ========================================================================
+    // Map Hash Calculation (TZ 4.10.3)
+    // ========================================================================
+    static QString calculateMapHash(const QByteArray &mapJsonBytes, const QByteArray &audioBytes);
+
+    // ========================================================================
+    // Cache Management
+    // ========================================================================
+    QString cacheDirectory() const;
+    void clearCache();
+
+private:
+    explicit BeatmapManager(QObject *parent = nullptr);
+    ~BeatmapManager() override = default;
+    BeatmapManager(const BeatmapManager&) = delete;
+    BeatmapManager& operator=(const BeatmapManager&) = delete;
+
+    QString m_cacheDir;
+};
+
+#endif // BEATMAPMANAGER_H

@@ -6,6 +6,7 @@
 
 class MainMenuWidget;
 class SettingsWidget;
+class SongSelectWidget;
 
 /**
  * @brief MainWindow acts as the central router and coordinator between application screens.
@@ -21,6 +22,7 @@ public:
     enum ScreenIndex {
         Screen_MainMenu = 0,
         Screen_Settings = 1,
+        Screen_SongSelect = 2,
         Screen_PlayPlaceholder = 2,
         Screen_EditorPlaceholder = 3
     };
@@ -44,6 +46,7 @@ private:
     QStackedWidget *m_stackedWidget;
     MainMenuWidget *m_mainMenuWidget;
     SettingsWidget *m_settingsWidget;
+    SongSelectWidget *m_songSelectWidget;
 };
 
 #endif // MAINWINDOW_H
