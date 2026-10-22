@@ -1,6 +1,7 @@
 #include "mainmenuwidget.h"
 #include "settingsmanager.h"
 #include "theme.h"
+#include "audiomanager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -20,6 +21,9 @@ MainMenuWidget::MainMenuWidget(QWidget *parent)
 
     connect(&SettingsManager::instance(), &SettingsManager::nicknameChanged,
             this, &MainMenuWidget::refreshProfileInfo);
+
+    // Запускаем фоновую музыку главного меню
+    AudioManager::instance().playMenuMusic();
 }
 
 void MainMenuWidget::paintEvent(QPaintEvent *event)
@@ -114,10 +118,22 @@ void MainMenuWidget::setupUi()
     // Danger accent for exit button hover
     btnExit->setStyleSheet(Theme::menuExitButtonStyle());
 
-    connect(btnPlay, &QPushButton::clicked, this, &MainMenuWidget::playRequested);
-    connect(btnEditor, &QPushButton::clicked, this, &MainMenuWidget::editorRequested);
-    connect(btnSettings, &QPushButton::clicked, this, &MainMenuWidget::settingsRequested);
-    connect(btnExit, &QPushButton::clicked, this, &MainMenuWidget::exitRequested);
+    connect(btnPlay, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        emit playRequested();
+    });
+    connect(btnEditor, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        emit editorRequested();
+    });
+    connect(btnSettings, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        emit settingsRequested();
+    });
+    connect(btnExit, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        emit exitRequested();
+    });
 
     buttonCenterContainer->addWidget(btnPlay);
     buttonCenterContainer->addWidget(btnEditor);

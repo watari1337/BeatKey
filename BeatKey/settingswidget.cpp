@@ -1,6 +1,7 @@
 #include "settingswidget.h"
 #include "settingsmanager.h"
 #include "theme.h"
+#include "audiomanager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -205,7 +206,10 @@ void SettingsWidget::setupUi()
     m_backBtn = new QPushButton(QStringLiteral("← Главное меню"), this);
     m_backBtn->setCursor(Qt::PointingHandCursor);
     m_backBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    connect(m_backBtn, &QPushButton::clicked, this, &SettingsWidget::backRequested);
+    connect(m_backBtn, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        emit backRequested();
+    });
 
     auto *titleLabel = new QLabel(QStringLiteral("НАСТРОЙКИ"), this);
     titleLabel->setStyleSheet(QStringLiteral(
@@ -376,9 +380,11 @@ void SettingsWidget::setupUi()
         plus10Btn->setStyleSheet(stepBtnStyle);
 
         connect(minus10Btn, &QPushButton::clicked, this, [this]() {
+            AudioManager::instance().playClickSound();
             m_offsetSpinBox->setValue(m_offsetSpinBox->value() - 10);
         });
         connect(plus10Btn, &QPushButton::clicked, this, [this]() {
+            AudioManager::instance().playClickSound();
             m_offsetSpinBox->setValue(m_offsetSpinBox->value() + 10);
         });
 
@@ -440,7 +446,10 @@ void SettingsWidget::setupUi()
     m_resetBtn = new QPushButton(QStringLiteral("Сбросить по умолчанию"), this);
     m_resetBtn->setCursor(Qt::PointingHandCursor);
     m_resetBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    connect(m_resetBtn, &QPushButton::clicked, this, &SettingsWidget::resetDefaults);
+    connect(m_resetBtn, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        resetDefaults();
+    });
 
     bottomLayout->addWidget(m_resetBtn);
     bottomLayout->addStretch(1);
@@ -499,6 +508,9 @@ void SettingsWidget::resetDefaults()
 
 void SettingsWidget::startAutoCalibration()
 {
+    // Воспроизводим тестовый щелчок метронома
+    AudioManager::instance().playMetronomeSound();
+
     // Stub per TZ for interactive 10-tap calibration
     QMessageBox::information(this, QStringLiteral("Автокалибровка задержки"),
                              QStringLiteral("Режим автокалибровки:\n\n"

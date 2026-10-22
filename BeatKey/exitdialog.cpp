@@ -1,5 +1,6 @@
 #include "exitdialog.h"
 #include "theme.h"
+#include "audiomanager.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGraphicsDropShadowEffect>
@@ -88,8 +89,14 @@ void ExitDialog::setupUi()
     exitBtn->setCursor(Qt::PointingHandCursor);
     exitBtn->setStyleSheet(Theme::dangerButtonStyle());
 
-    connect(cancelBtn, &QPushButton::clicked, this, &QDialog::reject);
-    connect(exitBtn, &QPushButton::clicked, this, &QDialog::accept);
+    connect(cancelBtn, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        reject();
+    });
+    connect(exitBtn, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        accept();
+    });
 
     buttonLayout->addWidget(cancelBtn);
     buttonLayout->addWidget(exitBtn);
