@@ -9,6 +9,11 @@
 #include <QCryptographicHash>
 #include <QStandardPaths>
 #include <QDebug>
+#include <QRegularExpression>
+#include <QRandomGenerator>
+#include <QBuffer>
+#include <QCoreApplication>
+
 
 BeatmapManager& BeatmapManager::instance()
 {
@@ -141,9 +146,10 @@ Beatmap BeatmapManager::loadFromFile(const QString &bkeyFilePath, QString *error
     // Восстанавливаем путь к bkey
     map.bkeyFilePath = bkeyFilePath;
 
-    // 4. Присутствие внутри архива аудиофайла и проверка формата строго .mp3
-    if (!map.meta.audioFileName.endsWith(QStringLiteral(".mp3"), Qt::CaseInsensitive)) {
-        QString err = QStringLiteral("Ошибка валидации карты .bkey: поддерживается только аудиоформат .mp3, получено '%1'.")
+    // 4. Присутствие внутри архива аудиофайла и проверка формата (.mp3, .wav, .ogg)
+    QString audioExt = QFileInfo(map.meta.audioFileName).suffix().toLower();
+    if (audioExt != QStringLiteral("mp3") && audioExt != QStringLiteral("wav") && audioExt != QStringLiteral("ogg")) {
+        QString err = QStringLiteral("Ошибка валидации карты .bkey: поддерживаются аудиоформаты .mp3, .wav, .ogg, получено '%1'.")
                           .arg(map.meta.audioFileName);
         if (error) *error = err;
         map.errorMessage = err;
@@ -197,26 +203,60 @@ Beatmap BeatmapManager::loadFromFile(const QString &bkeyFilePath, QString *error
 }
 
 // ============================================================================
+// Unique Package Path Generation
+// ============================================================================
+
+QString BeatmapManager::generateUniqueBkeyPath(const QString &title) const
+{
+    QString songsDir = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("songs"));
+    QDir().mkpath(songsDir);
+
+    QString sanitized = title.trimmed();
+    // Заменяем недопустимые символы файловой системы и пробелы на подчеркивание
+    sanitized.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|\\x00-\\x1F]")), QStringLiteral("_"));
+    sanitized.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral("_"));
+
+    // Убираем точки и подчеркивания в начале и конце имени
+    sanitized.remove(QRegularExpression(QStringLiteral("^[._]+|[._]+$")));
+
+    if (sanitized.isEmpty()) {
+        sanitized = QStringLiteral("map");
+    }
+
+    QString candidatePath;
+    do {
+        // Генерируем 6-значную шестнадцатеричную соль (например: a3f89c)
+        quint32 randVal = QRandomGenerator::global()->generate() & 0xFFFFFF;
+        QString salt = QString::asprintf("%06x", randVal);
+        QString fileName = QStringLiteral("%1_%2.bkey").arg(sanitized, salt);
+        candidatePath = QDir(songsDir).filePath(fileName);
+    } while (QFile::exists(candidatePath));
+
+    return candidatePath;
+}
+
+// ============================================================================
 // Export Package to .bkey
 // ============================================================================
 
 bool BeatmapManager::exportToFile(const QString &outBkeyPath,
                                   Beatmap &beatmap,
-                                  const QString &audioSourceMp3Path,
+                                  const QString &audioSourcePath,
                                   const QString &coverImagePath,
                                   QString *error)
 {
-    QFileInfo audioInfo(audioSourceMp3Path);
-    if (!audioInfo.exists() || !audioInfo.fileName().endsWith(QStringLiteral(".mp3"), Qt::CaseInsensitive)) {
-        QString err = QStringLiteral("Исходный аудиофайл '%1' не найден или не является .mp3.")
-                          .arg(audioSourceMp3Path);
+    QFileInfo audioInfo(audioSourcePath);
+    QString audioExt = audioInfo.suffix().toLower();
+    if (!audioInfo.exists() || (audioExt != QStringLiteral("mp3") && audioExt != QStringLiteral("wav") && audioExt != QStringLiteral("ogg"))) {
+        QString err = QStringLiteral("Исходный аудиофайл '%1' не найден или не является аудиоформатом (.mp3, .wav, .ogg).")
+                          .arg(audioSourcePath);
         if (error) *error = err;
         return false;
     }
 
-    QFile audioFile(audioSourceMp3Path);
+    QFile audioFile(audioSourcePath);
     if (!audioFile.open(QIODevice::ReadOnly)) {
-        QString err = QStringLiteral("Не удалось прочитать аудиофайл '%1'.").arg(audioSourceMp3Path);
+        QString err = QStringLiteral("Не удалось прочитать аудиофайл '%1'.").arg(audioSourcePath);
         if (error) *error = err;
         return false;
     }
@@ -233,6 +273,12 @@ bool BeatmapManager::exportToFile(const QString &outBkeyPath,
             coverFile.close();
             beatmap.meta.coverFileName = QFileInfo(coverImagePath).fileName();
         }
+    } else if (!beatmap.coverImage.isNull() && !beatmap.meta.coverFileName.isEmpty()) {
+        QBuffer buffer(&coverBytes);
+        buffer.open(QIODevice::WriteOnly);
+        QString ext = QFileInfo(beatmap.meta.coverFileName).suffix().toLower();
+        const char *fmt = (ext == QStringLiteral("png")) ? "PNG" : "JPG";
+        beatmap.coverImage.save(&buffer, fmt);
     }
 
     // Формируем map.json и рассчитываем контрольный хеш
@@ -240,8 +286,13 @@ bool BeatmapManager::exportToFile(const QString &outBkeyPath,
     beatmap.id = calculateMapHash(tempJson, audioBytes);
     QByteArray finalJson = beatmap.toJson(true);
 
-    // Записываем архив через QZipWriter
-    QZipWriter writer(outBkeyPath);
+    // Записываем архив во временный файл для гарантированной атомарности
+    QString tempOutPath = outBkeyPath + QStringLiteral(".tmp");
+    if (QFile::exists(tempOutPath)) {
+        QFile::remove(tempOutPath);
+    }
+
+    QZipWriter writer(tempOutPath);
     if (writer.status() != QZipWriter::NoError) {
         QString err = QStringLiteral("Не удалось создать архив '%1'.").arg(outBkeyPath);
         if (error) *error = err;
@@ -255,6 +306,31 @@ bool BeatmapManager::exportToFile(const QString &outBkeyPath,
     }
 
     writer.close();
+
+    if (QFile::exists(outBkeyPath)) {
+        QFile::remove(outBkeyPath);
+    }
+    if (!QFile::rename(tempOutPath, outBkeyPath)) {
+        QString err = QStringLiteral("Не удалось сохранить итоговый файл '%1'.").arg(outBkeyPath);
+        if (error) *error = err;
+        return false;
+    }
+
+    beatmap.bkeyFilePath = outBkeyPath;
+
+    // Извлекаем аудиофайл в кэш для предпрослушивания и редактора
+    QString songDir = m_cacheDir + QStringLiteral("/") + beatmap.id;
+    QDir().mkpath(songDir);
+    QString cachedAudioPath = songDir + QStringLiteral("/") + beatmap.meta.audioFileName;
+    if (!QFile::exists(cachedAudioPath)) {
+        QFile outFile(cachedAudioPath);
+        if (outFile.open(QIODevice::WriteOnly)) {
+            outFile.write(audioBytes);
+            outFile.close();
+        }
+    }
+    beatmap.extractedAudioPath = cachedAudioPath;
+
     qDebug() << "[BeatmapManager] Успешно экспортирована карта:" << outBkeyPath;
     return true;
 }

@@ -1,3 +1,4 @@
+#include <QStandardPaths>
 #include "songselectwidget.h"
 #include "beatmapmanager.h"
 #include "audiomanager.h"
@@ -345,10 +346,11 @@ void SongSelectWidget::handleAddMap()
 {
     AudioManager::instance().playClickSound();
 
+    QString desktopPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
     QStringList selectedFiles = QFileDialog::getOpenFileNames(
         this,
         QStringLiteral("Выберите файлы карт BeatKey"),
-        QString(),
+        desktopPath,
         QStringLiteral("Карты BeatKey (*.bkey);;Все файлы (*.*)")
     );
 

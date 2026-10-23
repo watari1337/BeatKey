@@ -358,6 +358,8 @@ void SettingsWidget::setupUi()
         m_offsetSpinBox->setRange(SettingsManager::MIN_AUDIO_OFFSET_MS, SettingsManager::MAX_AUDIO_OFFSET_MS);
         m_offsetSpinBox->setSuffix(QStringLiteral(" мс"));
         m_offsetSpinBox->setSingleStep(5);
+        m_offsetSpinBox->setButtonSymbols(QAbstractSpinBox::NoButtons);
+        m_offsetSpinBox->setAlignment(Qt::AlignCenter);
         m_offsetSpinBox->setStyleSheet(Theme::spinBoxStyle());
         connect(m_offsetSpinBox, QOverload<int>::of(&QSpinBox::valueChanged), this, [](int v) {
             SettingsManager::instance().setAudioOffsetMs(v);

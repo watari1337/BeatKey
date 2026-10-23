@@ -3,6 +3,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QFileInfo>
 #include <algorithm>
 
 // ============================================================================
@@ -159,12 +160,14 @@ Beatmap Beatmap::fromJson(const QByteArray &jsonData, QString *error)
     }
     map.meta = BeatmapMeta::fromJson(root[QStringLiteral("meta")].toObject());
 
-    // Валидация аудио: строго MP3
-    if (!map.meta.audioFileName.endsWith(QStringLiteral(".mp3"), Qt::CaseInsensitive)) {
-        QString err = QStringLiteral("Неподдерживаемый аудиоформат '%1'. Поддерживается только .mp3.")
+    // Валидация аудио: поддерживаются .mp3, .wav, .ogg
+    QString audioExt = QFileInfo(map.meta.audioFileName).suffix().toLower();
+    if (audioExt != QStringLiteral("mp3") && audioExt != QStringLiteral("wav") && audioExt != QStringLiteral("ogg")) {
+        QString err = QStringLiteral("Неподдерживаемый аудиоформат '%1'. Поддерживаются .mp3, .wav, .ogg.")
                           .arg(map.meta.audioFileName);
         if (error) *error = err;
         map.errorMessage = err;
+        map.isValid = false;
         return map;
     }
 

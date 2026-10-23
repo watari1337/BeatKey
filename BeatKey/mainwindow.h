@@ -7,6 +7,8 @@
 class MainMenuWidget;
 class SettingsWidget;
 class SongSelectWidget;
+class EditorHubWidget;
+class BeatmapEditorWidget;
 
 /**
  * @brief MainWindow acts as the central router and coordinator between application screens.
@@ -24,7 +26,9 @@ public:
         Screen_Settings = 1,
         Screen_SongSelect = 2,
         Screen_PlayPlaceholder = 2,
-        Screen_EditorPlaceholder = 3
+        Screen_EditorHub = 3,
+        Screen_EditorPlaceholder = 3,
+        Screen_Editor = 4
     };
 
     explicit MainWindow(QWidget *parent = nullptr);
@@ -47,6 +51,8 @@ private:
     MainMenuWidget *m_mainMenuWidget;
     SettingsWidget *m_settingsWidget;
     SongSelectWidget *m_songSelectWidget;
+    EditorHubWidget *m_editorHubWidget;
+    BeatmapEditorWidget *m_editorWidget;
 };
 
 #endif // MAINWINDOW_H

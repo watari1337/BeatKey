@@ -41,8 +41,8 @@ namespace Theme {
         inline const QColor BorderSubtle{90, 56, 143};        // #5a388f
         inline const QColor BorderFocused{162, 89, 255};      // #a259ff
 
-        inline const QColor Danger{255, 85, 119};             // #ff5577
-        inline const QColor DangerDark{184, 43, 74};          // #b82b4a
+        inline const QColor Danger{217, 83, 111};             // #d9536f (soft rose)
+        inline const QColor DangerDark{170, 50, 75};          // #b82b4a
         inline const QColor Success{46, 204, 113};            // #2ecc71
         inline const QColor SuccessDark{27, 138, 90};         // #1b8a5a
         inline const QColor Warning{255, 170, 0};             // #ffaa00
@@ -76,6 +76,12 @@ namespace Theme {
     QString sliderStyle();
     QString scrollAreaStyle();
     QString exitDialogContainerStyle();
+
+    QString dialogContainerStyle();
+    QString editorCardStyle();
+    QString errorLineEditStyle();
+    QString errorButtonStyle();
+    QString toolButtonStyle();
 }
 
 #endif // THEME_H

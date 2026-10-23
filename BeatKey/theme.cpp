@@ -70,9 +70,9 @@ QString secondaryButtonStyle()
         "  color: #bb9af7;"
         "  border: 1px solid #65439c;"
         "  border-radius: 8px;"
-        "  padding: 8px 18px;"
+        "  padding: 8px 12px;"
         "  font-family: 'Segoe UI', sans-serif;"
-        "  font-size: 14px;"
+        "  font-size: 13px;"
         "  font-weight: bold;"
         "}"
         "QPushButton:hover {"
@@ -213,16 +213,31 @@ QString lineEditStyle()
 QString spinBoxStyle()
 {
     return QStringLiteral(
-        "QSpinBox {"
+        "QSpinBox, QDoubleSpinBox {"
         "  background: #1c1430;"
         "  color: #ffffff;"
         "  border: 1px solid #7d44cf;"
-        "  border-radius: 6px;"
-        "  padding: 6px;"
+        "  border-radius: 8px;"
+        "  padding: 8px 12px;"
         "  font-size: 14px;"
-        "  font-weight: bold;"
         "  font-family: 'Segoe UI', sans-serif;"
-        "  min-width: 90px;"
+        "  min-width: 80px;"
+        "}"
+        "QSpinBox:focus, QDoubleSpinBox:focus {"
+        "  border: 1px solid #a259ff;"
+        "}"
+        "QSpinBox::up-button, QSpinBox::down-button, "
+        "QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {"
+        "  width: 0px;"
+        "  height: 0px;"
+        "  border: none;"
+        "  padding: 0px;"
+        "}"
+        "QSpinBox::up-arrow, QSpinBox::down-arrow, "
+        "QDoubleSpinBox::up-arrow, QDoubleSpinBox::down-arrow {"
+        "  width: 0px;"
+        "  height: 0px;"
+        "  border: none;"
         "}"
     );
 }
@@ -236,36 +251,50 @@ QString comboBoxStyle()
         "  border: 1px solid #7d44cf;"
         "  border-radius: 8px;"
         "  padding: 8px 14px;"
+        "  padding-right: 32px;"
         "  font-size: 14px;"
         "  font-family: 'Segoe UI', sans-serif;"
-        "  min-width: 250px;"
+        "  min-width: 140px;"
         "}"
         "QComboBox:hover {"
         "  border: 1px solid #a259ff;"
         "}"
         "QComboBox::drop-down {"
         "  subcontrol-origin: padding;"
-        "  subcontrol-position: top right;"
-        "  width: 30px;"
-        "  border-left: 1px solid #5a388f;"
+        "  subcontrol-position: center right;"
+        "  width: 26px;"
+        "  border: none;"
+        "  background: transparent;"
         "}"
         "QComboBox::down-arrow {"
-        "  width: 0;"
-        "  height: 0;"
+        "  width: 0px;"
+        "  height: 0px;"
         "  border-left: 5px solid transparent;"
         "  border-right: 5px solid transparent;"
         "  border-top: 6px solid #bb9af7;"
-        "  margin-right: 2px;"
+        "  margin-right: 8px;"
+        "}"
+        "QComboBox::down-arrow:hover {"
+        "  border-top: 6px solid #ffffff;"
         "}"
         "QComboBox QAbstractItemView {"
         "  background: #1c1430;"
         "  color: #ffffff;"
-        "  selection-background-color: #5c2bb8;"
+        "  selection-background-color: #8c42ec;"
         "  selection-color: #ffffff;"
-        "  border: 1px solid #7d44cf;"
+        "  border: 1px solid #a259ff;"
         "  border-radius: 6px;"
         "  padding: 4px;"
         "  outline: none;"
+        "}"
+        "QComboBox QAbstractItemView::item {"
+        "  padding: 8px 12px;"
+        "  border-radius: 4px;"
+        "}"
+        "QComboBox QAbstractItemView::item:hover,"
+        "QComboBox QAbstractItemView::item:selected {"
+        "  background: #8c42ec;"
+        "  color: #ffffff;"
         "}"
     );
 }
@@ -322,6 +351,90 @@ QString exitDialogContainerStyle()
         "QLabel {"
         "  color: #ffffff;"
         "  font-family: 'Segoe UI', sans-serif;"
+        "}"
+    );
+}
+
+
+QString dialogContainerStyle()
+{
+    return QStringLiteral(
+        "QWidget#dialogContainer {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #18112c, stop:1 #24143e);"
+        "  border: 2px solid #7d44cf;"
+        "  border-radius: 16px;"
+        "}"
+    );
+}
+
+QString editorCardStyle()
+{
+    return QStringLiteral(
+        "QFrame {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(36, 24, 60, 230), stop:1 rgba(46, 28, 76, 230));"
+        "  border: 1px solid #7d44cf;"
+        "  border-radius: 12px;"
+        "}"
+    );
+}
+
+QString errorLineEditStyle()
+{
+    return QStringLiteral(
+        "QLineEdit {"
+        "  background: #251622;"
+        "  color: #ffffff;"
+        "  border: 2px solid #d9536f;"
+        "  border-radius: 8px;"
+        "  padding: 8px 12px;"
+        "  font-size: 14px;"
+        "  font-family: 'Segoe UI', sans-serif;"
+        "}"
+        "QLineEdit:focus {"
+        "  border: 2px solid #e57388;"
+        "}"
+    );
+}
+
+QString errorButtonStyle()
+{
+    return QStringLiteral(
+        "QPushButton {"
+        "  background: #251622;"
+        "  color: #e57388;"
+        "  border: 2px solid #d9536f;"
+        "  border-radius: 8px;"
+        "  padding: 8px 14px;"
+        "  font-size: 13px;"
+        "  font-family: 'Segoe UI', sans-serif;"
+        "}"
+        "QPushButton:hover {"
+        "  background: #331c2c;"
+        "  border: 2px solid #e57388;"
+        "}"
+    );
+}
+
+QString toolButtonStyle()
+{
+    return QStringLiteral(
+        "QPushButton {"
+        "  background: #281c44;"
+        "  color: #bb9af7;"
+        "  border: 1px solid #6b40b0;"
+        "  border-radius: 8px;"
+        "  font-size: 16px;"
+        "  font-weight: bold;"
+        "}"
+        "QPushButton:hover {"
+        "  background: #3d2866;"
+        "  color: #ffffff;"
+        "  border: 1px solid #a259ff;"
+        "}"
+        "QPushButton:checked {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7d44cf, stop:1 #a259ff);"
+        "  color: #ffffff;"
+        "  border: 2px solid #d580ff;"
         "}"
     );
 }
