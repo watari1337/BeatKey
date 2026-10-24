@@ -20,6 +20,9 @@ SOURCES += \
     songselectwidget.cpp \
     newbeatmapdialog.cpp \
     editorhubwidget.cpp \
+    audiowaveform.cpp \
+    editorcommands.cpp \
+    editorhelpdialog.cpp \
     editortimelinecanvas.cpp \
     beatmapeditorwidget.cpp
 
@@ -39,6 +42,9 @@ HEADERS += \
     songselectwidget.h \
     newbeatmapdialog.h \
     editorhubwidget.h \
+    audiowaveform.h \
+    editorcommands.h \
+    editorhelpdialog.h \
     editortimelinecanvas.h \
     beatmapeditorwidget.h
 
