@@ -400,9 +400,13 @@ QString editorCardStyle()
 {
     return QStringLiteral(
         "QFrame {"
-        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(36, 24, 60, 230), stop:1 rgba(46, 28, 76, 230));"
-        "  border: 1px solid #7d44cf;"
+        "  background: rgba(26, 16, 44, 175);"
+        "  border: 1px solid rgba(125, 68, 207, 180);"
         "  border-radius: 12px;"
+        "}"
+        "QLabel {"
+        "  background: transparent;"
+        "  border: none;"
         "}"
     );
 }
@@ -465,6 +469,67 @@ QString toolButtonStyle()
         "  color: #ffffff;"
         "  border: 2px solid #d580ff;"
         "}"
+    );
+}
+
+QString tabButtonStyle()
+{
+    return QStringLiteral(
+        "QPushButton {"
+        "  background: rgba(30, 20, 50, 170);"
+        "  color: #a09cb0;"
+        "  border: 1px solid rgba(125, 68, 207, 120);"
+        "  border-radius: 8px;"
+        "  padding: 6px 16px;"
+        "  font-size: 13px;"
+        "  font-weight: bold;"
+        "  font-family: 'Segoe UI', sans-serif;"
+        "}"
+        "QPushButton:hover {"
+        "  background: rgba(56, 36, 92, 220);"
+        "  color: #ffffff;"
+        "  border: 1px solid #a259ff;"
+        "}"
+        "QPushButton:checked {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #7d44cf, stop:1 #a259ff);"
+        "  color: #ffffff;"
+        "  border: 1px solid #d580ff;"
+        "}"
+    );
+}
+
+QString cardHeaderStyle()
+{
+    return QStringLiteral(
+        "color: #bb9af7;"
+        "font-size: 12px;"
+        "font-weight: bold;"
+        "font-family: 'Segoe UI', sans-serif;"
+        "background: transparent;"
+        "border: none;"
+    );
+}
+
+QString secondaryLabelStyle()
+{
+    return QStringLiteral(
+        "color: #a09cb0;"
+        "font-size: 11px;"
+        "font-family: 'Segoe UI', sans-serif;"
+        "background: transparent;"
+        "border: none;"
+    );
+}
+
+QString accentLabelStyle()
+{
+    return QStringLiteral(
+        "color: #2ecc71;"
+        "font-size: 11px;"
+        "font-weight: bold;"
+        "font-family: 'Segoe UI', sans-serif;"
+        "background: transparent;"
+        "border: none;"
     );
 }
 

@@ -13,10 +13,13 @@
 #include <QGraphicsDropShadowEffect>
 #include <QKeySequence>
 #include <QDebug>
+#include <QFileDialog>
+#include <QStandardPaths>
 
 EditorHubWidget::EditorHubWidget(QWidget *parent)
     : QWidget(parent)
     , m_backBtn(nullptr)
+    , m_importFolderBtn(nullptr)
     , m_createMapBtn(nullptr)
     , m_contentContainer(nullptr)
     , m_emptyStateWidget(nullptr)
@@ -82,10 +85,17 @@ void EditorHubWidget::setupUi()
     m_createMapBtn->setStyleSheet(Theme::primaryButtonStyle());
     connect(m_createMapBtn, &QPushButton::clicked, this, &EditorHubWidget::handleCreateNewMap);
 
+    m_importFolderBtn = new QPushButton(QStringLiteral("Загрузить папку"), this);
+    m_importFolderBtn->setCursor(Qt::PointingHandCursor);
+    m_importFolderBtn->setStyleSheet(Theme::secondaryButtonStyle());
+    connect(m_importFolderBtn, &QPushButton::clicked, this, &EditorHubWidget::handleImportFolder);
+
     headerLayout->addWidget(m_backBtn);
     headerLayout->addSpacing(20);
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch(1);
+    headerLayout->addWidget(m_importFolderBtn);
+    headerLayout->addSpacing(12);
     headerLayout->addWidget(m_createMapBtn);
 
     mainLayout->addLayout(headerLayout);
@@ -253,6 +263,7 @@ void EditorHubWidget::setupUi()
     connect(m_startEditBtn, &QPushButton::clicked, this, [this]() {
         AudioManager::instance().playClickSound();
         int row = m_mapListWidget->currentRow();
+        qDebug() << "[EditorHubWidget] edit button clicked! row=" << row << "m_loadedBeatmaps count=" << m_loadedBeatmaps.size();
         if (row >= 0 && row < m_loadedBeatmaps.size()) {
             emit editMapRequested(m_loadedBeatmaps[row]);
         }
@@ -287,7 +298,7 @@ void EditorHubWidget::setupUi()
 
     auto *emptyDesc = new QLabel(
         QStringLiteral("В папке пока нет доступных карт.\n"
-                       "Нажмите кнопку «+ Создать карту» в правом верхнем углу, чтобы начать создание новой карты."),
+                       "Нажмите кнопку «+ Создать карту» или «Загрузить папку», чтобы начать работу."),
         m_emptyStateWidget
     );
     emptyDesc->setAlignment(Qt::AlignCenter);
@@ -335,6 +346,28 @@ void EditorHubWidget::updateEmptyStateVisibility()
     bool hasMaps = !m_loadedBeatmaps.isEmpty();
     m_contentContainer->setVisible(hasMaps);
     m_emptyStateWidget->setVisible(!hasMaps);
+}
+
+void EditorHubWidget::handleImportFolder()
+{
+    AudioManager::instance().playClickSound();
+
+    QString desktopPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    QString chosenDir = QFileDialog::getExistingDirectory(
+        this,
+        QStringLiteral("Выберите папку с картами BeatKey"),
+        desktopPath,
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
+    );
+
+    if (chosenDir.isEmpty()) {
+        return;
+    }
+
+    QString targetDir = SongSelectWidget::songsDirectory();
+    BeatmapManager::instance().importAllFromDirectory(chosenDir, targetDir);
+
+    refreshMapList();
 }
 
 void EditorHubWidget::handleCreateNewMap()
@@ -395,8 +428,13 @@ void EditorHubWidget::updateDetailsCard(const Beatmap &map)
     m_notesCountLabel->setText(QString::number(map.totalNotes()));
     m_durationLabel->setText(map.formattedDuration());
 
-    if (!map.coverImage.isNull()) {
-        m_coverArtLabel->setPixmap(map.coverImage.scaled(m_coverArtLabel->size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+    QPixmap cover = map.coverImage;
+    if (cover.isNull()) {
+        static QPixmap defaultBg(QStringLiteral(":/assets/images/standard_bg2.jpg"));
+        cover = defaultBg;
+    }
+    if (!cover.isNull()) {
+        m_coverArtLabel->setPixmap(cover.scaled(m_coverArtLabel->size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
     } else {
         m_coverArtLabel->clear();
         m_coverArtLabel->setText(QStringLiteral("Нет обложки"));

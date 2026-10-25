@@ -85,6 +85,10 @@ namespace Theme {
     QString errorLineEditStyle();
     QString errorButtonStyle();
     QString toolButtonStyle();
+    QString tabButtonStyle();
+    QString cardHeaderStyle();
+    QString secondaryLabelStyle();
+    QString accentLabelStyle();
 }
 
 /**

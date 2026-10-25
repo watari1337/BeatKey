@@ -7,6 +7,7 @@
 #include <QSlider>
 #include <QScrollBar>
 #include <QScrollArea>
+#include <QStackedWidget>
 #include <QButtonGroup>
 #include <QComboBox>
 #include <QLineEdit>
@@ -17,6 +18,7 @@
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QUndoStack>
+#include <QResizeEvent>
 
 #include "beatmap.h"
 #include "editortimelinecanvas.h"
@@ -35,10 +37,19 @@ class BeatmapEditorWidget : public QWidget
 
 public:
     explicit BeatmapEditorWidget(QWidget *parent = nullptr);
-    ~BeatmapEditorWidget() override = default;
+    ~BeatmapEditorWidget() override;
 
     void loadBeatmap(const Beatmap &beatmap, const QString &audioPath, const QString &coverPath);
     void stopPlayback();
+    Beatmap currentBeatmap() const { return m_currentBeatmap; }
+    bool maybeSaveAndExit();
+    bool hasUnsavedChanges() const;
+    bool isMetadataModified() const;
+    int backgroundDim() const { return m_backgroundDimPercent; }
+    void setBackgroundDim(int percent) {
+        m_backgroundDimPercent = qBound(0, percent, 100);
+        update();
+    }
 
     // Undo/Redo executor hooks called by command objects
     void executeAddNote(const NoteData &note);
@@ -53,7 +64,9 @@ signals:
     void backRequested();
 
 protected:
+    void showEvent(QShowEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
 
@@ -78,7 +91,6 @@ private slots:
     void handleNotesMoved(const QVector<int> &originalTimes, int deltaMs);
     void handleSelectionChanged(const QVector<int> &selectedIndices);
     void handleScrollChanged(int scrollTimeMs, int totalDurationMs, int visibleMs);
-    void handleCanvasScrollbarMoved(int value);
     void handleHoverInfoChanged(int timeMs, int measure, double beatInMeasure);
 
     // Modes & Tools
@@ -104,6 +116,12 @@ private slots:
     void handleDeleteSelection();
     void handleUndo();
     void handleRedo();
+    void handleBackButtonClicked();
+    void handleTabChanged(int index);
+    void handleBgDimSliderChanged(int value);
+    void handleBgBlurSliderChanged(int value);
+    void handleBgDesatSliderChanged(int value);
+    void handleBgVignetteSliderChanged(int value);
 
 private:
     void setupUi();
@@ -113,13 +131,36 @@ private:
     void updateStats();
     bool validateMapData(QString *errorMessage);
     QString formatMsToTime(int ms) const;
+    QWidget* createEditorPage();
+    QWidget* createDescriptionPage();
+    QWidget* createPlaceholderPage(const QString &title, const QString &subtitle);
+    void updateCoverPreview();
+    void updateCachedBackground();
+    void updateStatusNotesCount();
+    int calculateLastNoteTime() const;
+    void recalculateMapDuration(int audioDurationMs = 0);
+    void setMapDuration(int durationMs);
 
     // Data
     Beatmap m_currentBeatmap;
     QString m_sourceAudioPath;
     QString m_sourceCoverPath;
+    BeatmapMeta m_initialMeta;
+    QString m_initialCoverPath;
+    QString m_initialAudioPath;
+    int m_initialDurationMs;
+    bool m_isDurationManuallyEdited;
+    int m_backgroundDimPercent;
+    int m_backgroundBlurRadius;
+    int m_desaturationPercent;
+    int m_vignettePercent;
+    QPixmap m_cachedBackgroundPixmap;
+    int m_audioDurationMs;
     int m_totalDurationMs;
     bool m_isScrubbing;
+    bool m_userScrolledAway;
+    bool m_isAutoScrolling;
+    int m_playheadInViewMs;
 
     // Audio & Waveform
     QMediaPlayer *m_mediaPlayer;
@@ -134,10 +175,33 @@ private:
     QUndoStack m_undoStack;
 
     // Tap Record mode session
+    bool m_isMetadataModified;
     bool m_isTapRecording;
     QVector<NoteData> m_tapRecordSessionNotes;
 
+    // Section Navigation Tabs & Stack
+    QButtonGroup *m_tabGroup;
+    QPushButton *m_tabEditorBtn;
+    QPushButton *m_tabDescriptionBtn;
+    QPushButton *m_tabTimingBtn;
+    QPushButton *m_tabTestBtn;
+    QStackedWidget *m_editorStack;
+
+    // Description Page Widgets
+    QLabel *m_descCoverPreview;
+    QLabel *m_descAudioPathLabel;
+    QSlider *m_descBgDimSlider;
+    QLabel *m_descBgDimValLabel;
+    QSlider *m_descBgBlurSlider;
+    QLabel *m_descBgBlurValLabel;
+    QSlider *m_descBgDesatSlider;
+    QLabel *m_descBgDesatValLabel;
+    QSlider *m_descBgVignetteSlider;
+    QLabel *m_descBgVignetteValLabel;
+
     // Top Header & Playback
+    QFrame *m_headerContainer;
+    QFrame *m_editorToolbar;
     QScrollArea *m_topScrollArea;
     QPushButton *m_backBtn;
     QLabel *m_mapTitleLabel;
@@ -163,8 +227,8 @@ private:
 
     // Center Workspace
     EditorTimelineCanvas *m_timelineCanvas;
-    QScrollBar *m_timelineScrollBar;
     QLabel *m_postprocessorLabel;
+    QLabel *m_statusNotesCountLabel;
     QLabel *m_zoomLabel;
 
     // Right Properties Panel: ScrollArea Container
@@ -177,6 +241,8 @@ private:
     QComboBox *m_metaDiffCombo;
     QDoubleSpinBox *m_metaBpmSpin;
     QSpinBox *m_metaOffsetSpin;
+    QSpinBox *m_metaDurationSpin;
+    QPushButton *m_autoDurationBtn;
     QPushButton *m_metaChooseCoverBtn;
     QLabel *m_metaCoverLabel;
     QPushButton *m_metaChooseAudioBtn;

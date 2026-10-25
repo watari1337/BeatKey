@@ -36,7 +36,7 @@ protected:
     void showEvent(QShowEvent *event) override;
 
 private slots:
-    void handleAddMap();
+    void handleImportFolder();
     void handleSongSelected(int row);
 
 private:
@@ -48,7 +48,7 @@ private:
 
     // Header controls
     QPushButton *m_backBtn;
-    QPushButton *m_addMapBtn;
+    QPushButton *m_importFolderBtn;
 
     // Content container & Empty State
     QWidget *m_contentContainer;

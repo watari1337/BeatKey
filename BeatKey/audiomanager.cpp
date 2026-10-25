@@ -244,3 +244,44 @@ void AudioManager::updateVolumes()
         }
     }
 }
+
+AudioManager::~AudioManager()
+{
+    cleanup();
+}
+
+void AudioManager::cleanup()
+{
+    stopMusic();
+    if (m_musicPlayer) {
+        m_musicPlayer->stop();
+        delete m_musicPlayer;
+        m_musicPlayer = nullptr;
+    }
+    if (m_musicOutput) {
+        delete m_musicOutput;
+        m_musicOutput = nullptr;
+    }
+
+    QSoundEffect* allSfx[] = {
+        m_sfxHit, m_sfxMiss, m_sfxComboBreak, m_sfxMetronome,
+        m_sfxCountdown, m_sfxFail, m_sfxClear, m_sfxClick, m_sfxHover
+    };
+
+    for (auto *eff : allSfx) {
+        if (eff) {
+            eff->stop();
+            delete eff;
+        }
+    }
+
+    m_sfxHit = nullptr;
+    m_sfxMiss = nullptr;
+    m_sfxComboBreak = nullptr;
+    m_sfxMetronome = nullptr;
+    m_sfxCountdown = nullptr;
+    m_sfxFail = nullptr;
+    m_sfxClear = nullptr;
+    m_sfxClick = nullptr;
+    m_sfxHover = nullptr;
+}

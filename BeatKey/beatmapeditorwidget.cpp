@@ -1,4 +1,5 @@
 #include "beatmapeditorwidget.h"
+#include "savepromptdialog.h"
 #include "beatmapmanager.h"
 #include "audiomanager.h"
 #include "settingsmanager.h"
@@ -13,6 +14,9 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFileDialog>
+#include <QStandardPaths>
+#include <QStackedWidget>
+#include <QButtonGroup>
 #include <QMessageBox>
 #include <QKeyEvent>
 #include <QShortcut>
@@ -22,15 +26,44 @@
 
 BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     : QWidget(parent)
+    , m_initialDurationMs(0)
+    , m_isDurationManuallyEdited(false)
+    , m_backgroundDimPercent(50)
+    , m_backgroundBlurRadius(0)
+    , m_desaturationPercent(0)
+    , m_vignettePercent(50)
+    , m_audioDurationMs(120000)
     , m_totalDurationMs(120000)
     , m_isScrubbing(false)
+    , m_userScrolledAway(false)
+    , m_isAutoScrolling(false)
+    , m_playheadInViewMs(0)
     , m_mediaPlayer(new QMediaPlayer(this))
     , m_audioOutput(new QAudioOutput(this))
     , m_playbackTimer(new QTimer(this))
     , m_waveform(new AudioWaveform(this))
     , m_clockBaseMs(0)
     , m_lastMediaPos(-1)
+    , m_isMetadataModified(false)
     , m_isTapRecording(false)
+    , m_tabGroup(nullptr)
+    , m_tabEditorBtn(nullptr)
+    , m_tabDescriptionBtn(nullptr)
+    , m_tabTimingBtn(nullptr)
+    , m_tabTestBtn(nullptr)
+    , m_editorStack(nullptr)
+    , m_descCoverPreview(nullptr)
+    , m_descAudioPathLabel(nullptr)
+    , m_descBgDimSlider(nullptr)
+    , m_descBgDimValLabel(nullptr)
+    , m_descBgBlurSlider(nullptr)
+    , m_descBgBlurValLabel(nullptr)
+    , m_descBgDesatSlider(nullptr)
+    , m_descBgDesatValLabel(nullptr)
+    , m_descBgVignetteSlider(nullptr)
+    , m_descBgVignetteValLabel(nullptr)
+    , m_headerContainer(nullptr)
+    , m_editorToolbar(nullptr)
     , m_topScrollArea(nullptr)
     , m_backBtn(nullptr)
     , m_mapTitleLabel(nullptr)
@@ -52,8 +85,8 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     , m_selectToolBtn(nullptr)
     , m_placeToolBtn(nullptr)
     , m_timelineCanvas(nullptr)
-    , m_timelineScrollBar(nullptr)
     , m_postprocessorLabel(nullptr)
+    , m_statusNotesCountLabel(nullptr)
     , m_zoomLabel(nullptr)
     , m_rightScrollArea(nullptr)
     , m_metaTitleEdit(nullptr)
@@ -62,6 +95,8 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     , m_metaDiffCombo(nullptr)
     , m_metaBpmSpin(nullptr)
     , m_metaOffsetSpin(nullptr)
+    , m_metaDurationSpin(nullptr)
+    , m_autoDurationBtn(nullptr)
     , m_metaChooseCoverBtn(nullptr)
     , m_metaCoverLabel(nullptr)
     , m_metaChooseAudioBtn(nullptr)
@@ -85,32 +120,38 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
 
     connect(m_mediaPlayer, &QMediaPlayer::durationChanged, this, [this](qint64 d) {
         if (d > 0) {
-            m_totalDurationMs = static_cast<int>(d);
-            m_scrubSlider->setRange(0, m_totalDurationMs);
-            m_timelineCanvas->setTotalDuration(m_totalDurationMs);
-            updateTimeDisplay(static_cast<int>(m_mediaPlayer->position()));
-            updateStats();
+            recalculateMapDuration(static_cast<int>(d));
+            if (!m_isDurationManuallyEdited) {
+                m_initialDurationMs = m_totalDurationMs;
+            }
         }
     });
 
-    connect(m_mediaPlayer, &QMediaPlayer::positionChanged, this, [this](qint64 pos) {
-        if (!m_isScrubbing) {
-            int currentMs = static_cast<int>(pos);
-            m_scrubSlider->setValue(currentMs);
-            m_timelineCanvas->setCurrentTime(currentMs);
-            updateTimeDisplay(currentMs);
+    connect(m_waveform, &AudioWaveform::waveformReady, this, [this]() {
+        if (m_waveform && m_waveform->durationMs() > 0) {
+            recalculateMapDuration(m_waveform->durationMs());
+            if (!m_isDurationManuallyEdited) {
+                m_initialDurationMs = m_totalDurationMs;
+            }
         }
+        m_timelineCanvas->update();
+    });
+
+    connect(m_mediaPlayer, &QMediaPlayer::positionChanged, this, [this](qint64 pos) {
+        int currentMs = static_cast<int>(pos);
+        m_timelineCanvas->setCurrentTime(currentMs);
+        updateTimeDisplay(currentMs);
     });
 
     connect(m_mediaPlayer, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
         if (state == QMediaPlayer::PlayingState) {
-            m_playBtn->setText(QStringLiteral("❚❚ Пауза"));
+            m_playBtn->setText(QStringLiteral("||"));
             m_audioClock.restart();
             m_clockBaseMs = m_mediaPlayer->position();
             m_lastMediaPos = m_clockBaseMs;
             m_playbackTimer->start(16);
         } else {
-            m_playBtn->setText(QStringLiteral("▶ Плей"));
+            m_playBtn->setText(QStringLiteral("▶"));
             m_playbackTimer->stop();
             m_audioClock.invalidate();
             if (m_isTapRecording) {
@@ -135,15 +176,137 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     qApp->installEventFilter(this);
 }
 
+BeatmapEditorWidget::~BeatmapEditorWidget()
+{
+    if (qApp) {
+        qApp->removeEventFilter(this);
+    }
+    stopPlayback();
+}
+
+void BeatmapEditorWidget::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    if (m_tabEditorBtn) {
+        m_tabEditorBtn->setChecked(true);
+    }
+    if (m_editorStack) {
+        m_editorStack->setCurrentIndex(0);
+    }
+    if (m_editorToolbar) {
+        m_editorToolbar->setVisible(true);
+    }
+    if (m_timelineCanvas) {
+        m_timelineCanvas->setFocus();
+    }
+}
+
+void BeatmapEditorWidget::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    updateCachedBackground();
+}
+
+void BeatmapEditorWidget::updateCachedBackground()
+{
+    if (width() <= 0 || height() <= 0) return;
+
+    QPixmap bgPixmap = m_currentBeatmap.coverImage;
+    if (bgPixmap.isNull() && !m_sourceCoverPath.isEmpty() && QFile::exists(m_sourceCoverPath)) {
+        m_currentBeatmap.coverImage.load(m_sourceCoverPath);
+        bgPixmap = m_currentBeatmap.coverImage;
+    }
+    if (bgPixmap.isNull()) {
+        static QPixmap defaultBg(QStringLiteral(":/assets/images/standard_bg2.jpg"));
+        bgPixmap = defaultBg;
+    }
+    if (bgPixmap.isNull()) {
+        m_cachedBackgroundPixmap = QPixmap();
+        return;
+    }
+
+    QPixmap scaled = bgPixmap.scaled(size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    int cropX = (scaled.width() - width()) / 2;
+    int cropY = (scaled.height() - height()) / 2;
+    QImage img = scaled.copy(cropX, cropY, width(), height()).toImage();
+
+    // Cinematic Blur: Fast Box-Filter Downsample & Upsample
+    if (m_backgroundBlurRadius > 0) {
+        int downFactor = 1 + (m_backgroundBlurRadius * 2);
+        int dw = qMax(16, width() / downFactor);
+        int dh = qMax(16, height() / downFactor);
+        QImage small = img.scaled(dw, dh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        img = small.scaled(width(), height(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
+
+    // Desaturation: Blend RGB toward Greyscale
+    if (m_desaturationPercent > 0) {
+        img = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+        int desatFactor = qBound(0, m_desaturationPercent, 100);
+        int invFactor = 100 - desatFactor;
+        int h = img.height();
+        int w = img.width();
+        for (int y = 0; y < h; ++y) {
+            auto *scanLine = reinterpret_cast<QRgb*>(img.scanLine(y));
+            for (int x = 0; x < w; ++x) {
+                QRgb p = scanLine[x];
+                int r = qRed(p);
+                int g = qGreen(p);
+                int b = qBlue(p);
+                int gray = (r * 77 + g * 150 + b * 29) >> 8;
+                int nr = (r * invFactor + gray * desatFactor) / 100;
+                int ng = (g * invFactor + gray * desatFactor) / 100;
+                int nb = (b * invFactor + gray * desatFactor) / 100;
+                scanLine[x] = qRgba(nr, ng, nb, qAlpha(p));
+            }
+        }
+    }
+
+    m_cachedBackgroundPixmap = QPixmap::fromImage(img);
+}
+
 void BeatmapEditorWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
     QPainter painter(this);
-    Theme::paintWindowBackground(&painter, rect());
-}
 
+    if (m_cachedBackgroundPixmap.isNull() || m_cachedBackgroundPixmap.size() != size()) {
+        updateCachedBackground();
+    }
+
+    if (!m_cachedBackgroundPixmap.isNull()) {
+        painter.drawPixmap(0, 0, m_cachedBackgroundPixmap);
+
+        // 1. Dark dimming overlay based on configurable background dim percent
+        int dimAlpha = qBound(0, static_cast<int>(m_backgroundDimPercent * 2.55), 255);
+        if (dimAlpha > 0) {
+            painter.fillRect(rect(), QColor(16, 10, 28, dimAlpha));
+        }
+
+        // 2. Cinematic Vignette (Radial gradient focusing attention on center)
+        if (m_vignettePercent > 0) {
+            double vigStrength = m_vignettePercent / 100.0;
+            QRadialGradient radial(rect().center(), qMax(width(), height()) * 0.72);
+            radial.setColorAt(0.0, QColor(0, 0, 0, 0));
+            radial.setColorAt(0.45, QColor(0, 0, 0, static_cast<int>(35 * vigStrength)));
+            radial.setColorAt(1.0, QColor(10, 6, 20, static_cast<int>(230 * vigStrength)));
+            painter.fillRect(rect(), radial);
+        }
+    } else {
+        Theme::paintWindowBackground(&painter, rect());
+    }
+}
 bool BeatmapEditorWidget::eventFilter(QObject *watched, QEvent *event)
 {
+    if (!isVisible()) {
+        return QWidget::eventFilter(watched, event);
+    }
+
+    QWidget *targetWidget = qobject_cast<QWidget *>(watched);
+    if (targetWidget && !this->isAncestorOf(targetWidget) && targetWidget != this) {
+        return QWidget::eventFilter(watched, event);
+    }
+
     // Horizontal mouse wheel scrolling for top bar scroll area
     if (m_topScrollArea && (watched == m_topScrollArea || watched == m_topScrollArea->viewport())) {
         if (event->type() == QEvent::Wheel) {
@@ -205,41 +368,51 @@ bool BeatmapEditorWidget::eventFilter(QObject *watched, QEvent *event)
 
 void BeatmapEditorWidget::setupShortcuts()
 {
-    // Quick Save
-    auto *scSave = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_S), this);
+    // Quick Save (Ctrl+S / Cmd+S)
+    auto *scSave = new QShortcut(QKeySequence::Save, this);
+    scSave->setContext(Qt::WidgetWithChildrenShortcut);
     connect(scSave, &QShortcut::activated, this, &BeatmapEditorWidget::handleSaveMap);
 
     // Undo
     auto *scUndo = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Z), this);
+    scUndo->setContext(Qt::WidgetWithChildrenShortcut);
     connect(scUndo, &QShortcut::activated, this, &BeatmapEditorWidget::handleUndo);
 
     // Redo
     auto *scRedo1 = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_Y), this);
+    scRedo1->setContext(Qt::WidgetWithChildrenShortcut);
     connect(scRedo1, &QShortcut::activated, this, &BeatmapEditorWidget::handleRedo);
 
     auto *scRedo2 = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z), this);
+    scRedo2->setContext(Qt::WidgetWithChildrenShortcut);
     connect(scRedo2, &QShortcut::activated, this, &BeatmapEditorWidget::handleRedo);
 
     // Delete
     auto *scDel = new QShortcut(QKeySequence(Qt::Key_Delete), this);
+    scDel->setContext(Qt::WidgetWithChildrenShortcut);
     connect(scDel, &QShortcut::activated, this, &BeatmapEditorWidget::handleDeleteSelection);
 
     auto *scBksp = new QShortcut(QKeySequence(Qt::Key_Backspace), this);
+    scBksp->setContext(Qt::WidgetWithChildrenShortcut);
     connect(scBksp, &QShortcut::activated, this, &BeatmapEditorWidget::handleDeleteSelection);
 
     // Step navigation
     auto *scLeft = new QShortcut(QKeySequence(Qt::Key_Left), this);
+    scLeft->setContext(Qt::WidgetWithChildrenShortcut);
     connect(scLeft, &QShortcut::activated, this, &BeatmapEditorWidget::handleStepBackward);
 
     auto *scRight = new QShortcut(QKeySequence(Qt::Key_Right), this);
+    scRight->setContext(Qt::WidgetWithChildrenShortcut);
     connect(scRight, &QShortcut::activated, this, &BeatmapEditorWidget::handleStepForward);
 
     // Help (F1)
     auto *scHelp = new QShortcut(QKeySequence(Qt::Key_F1), this);
+    scHelp->setContext(Qt::WidgetWithChildrenShortcut);
     connect(scHelp, &QShortcut::activated, this, &BeatmapEditorWidget::handleShowHelp);
 
     // Select All
     auto *scAll = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_A), this);
+    scAll->setContext(Qt::WidgetWithChildrenShortcut);
     connect(scAll, &QShortcut::activated, this, [this]() {
         m_timelineCanvas->selectAll();
     });
@@ -248,141 +421,221 @@ void BeatmapEditorWidget::setupShortcuts()
 void BeatmapEditorWidget::setupUi()
 {
     auto *rootLayout = new QVBoxLayout(this);
-    rootLayout->setContentsMargins(16, 12, 16, 14);
+    rootLayout->setContentsMargins(12, 10, 12, 12);
     rootLayout->setSpacing(8);
 
     // ========================================================================
-    // Top Bar (Controls, Navigation, Playback, Speed, Help, Save, Export)
+    // Top Bar 1: Header Navigation (Back + Section Tabs + Title + Save/Export Actions)
+    // Placed separately and distinctly above the editor controls bar
     // ========================================================================
-    auto *topBarContainer = new QFrame(this);
-    topBarContainer->setStyleSheet(Theme::editorCardStyle());
+    m_headerContainer = new QFrame(this);
+    m_headerContainer->setStyleSheet(Theme::editorCardStyle());
+    m_headerContainer->setFixedHeight(46);
 
-    auto *topBarLayout = new QVBoxLayout(topBarContainer);
-    topBarLayout->setContentsMargins(10, 6, 10, 6);
-    topBarLayout->setSpacing(4);
+    auto *headerLayout = new QHBoxLayout(m_headerContainer);
+    headerLayout->setContentsMargins(10, 6, 10, 6);
+    headerLayout->setSpacing(8);
+    headerLayout->setAlignment(Qt::AlignVCenter);
 
-    // Row 1: Action Controls wrapped inside horizontal QScrollArea (prevents text clipping on any resolution)
-    m_topScrollArea = new QScrollArea(topBarContainer);
+    // 1. Back button
+    m_backBtn = new QPushButton(QStringLiteral("← Назад"), m_headerContainer);
+    m_backBtn->setFocusPolicy(Qt::NoFocus);
+    m_backBtn->setCursor(Qt::PointingHandCursor);
+    m_backBtn->setStyleSheet(Theme::secondaryButtonStyle());
+    m_backBtn->setFixedSize(76, 32);
+    connect(m_backBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleBackButtonClicked);
+    headerLayout->addWidget(m_backBtn);
+
+    // Separator
+    auto *sepNav = new QFrame(m_headerContainer);
+    sepNav->setFrameShape(QFrame::VLine);
+    sepNav->setStyleSheet(QStringLiteral("background: #5a388f; max-width: 1px; margin: 4px 2px;"));
+    headerLayout->addWidget(sepNav);
+
+    // 2. Section Navigation Tabs: [Редактор] [Описание] [Тайминг] [Тест]
+    m_tabGroup = new QButtonGroup(this);
+    m_tabGroup->setExclusive(true);
+
+    auto *tabsContainer = new QWidget(m_headerContainer);
+    tabsContainer->setStyleSheet(QStringLiteral("background: transparent;"));
+    auto *tabsLayout = new QHBoxLayout(tabsContainer);
+    tabsLayout->setContentsMargins(0, 0, 0, 0);
+    tabsLayout->setSpacing(6);
+
+    m_tabEditorBtn = new QPushButton(QStringLiteral("Редактор"), tabsContainer);
+    m_tabEditorBtn->setFocusPolicy(Qt::NoFocus);
+    m_tabEditorBtn->setCheckable(true);
+    m_tabEditorBtn->setChecked(true);
+    m_tabEditorBtn->setCursor(Qt::PointingHandCursor);
+    m_tabEditorBtn->setStyleSheet(Theme::tabButtonStyle());
+    m_tabEditorBtn->setFixedHeight(32);
+    m_tabGroup->addButton(m_tabEditorBtn, 0);
+    tabsLayout->addWidget(m_tabEditorBtn);
+
+    m_tabDescriptionBtn = new QPushButton(QStringLiteral("Описание"), tabsContainer);
+    m_tabDescriptionBtn->setFocusPolicy(Qt::NoFocus);
+    m_tabDescriptionBtn->setCheckable(true);
+    m_tabDescriptionBtn->setCursor(Qt::PointingHandCursor);
+    m_tabDescriptionBtn->setStyleSheet(Theme::tabButtonStyle());
+    m_tabDescriptionBtn->setFixedHeight(32);
+    m_tabGroup->addButton(m_tabDescriptionBtn, 1);
+    tabsLayout->addWidget(m_tabDescriptionBtn);
+
+    m_tabTimingBtn = new QPushButton(QStringLiteral("Тайминг"), tabsContainer);
+    m_tabTimingBtn->setFocusPolicy(Qt::NoFocus);
+    m_tabTimingBtn->setCheckable(true);
+    m_tabTimingBtn->setCursor(Qt::PointingHandCursor);
+    m_tabTimingBtn->setStyleSheet(Theme::tabButtonStyle());
+    m_tabTimingBtn->setFixedHeight(32);
+    m_tabGroup->addButton(m_tabTimingBtn, 2);
+    tabsLayout->addWidget(m_tabTimingBtn);
+
+    m_tabTestBtn = new QPushButton(QStringLiteral("Тест"), tabsContainer);
+    m_tabTestBtn->setFocusPolicy(Qt::NoFocus);
+    m_tabTestBtn->setCheckable(true);
+    m_tabTestBtn->setCursor(Qt::PointingHandCursor);
+    m_tabTestBtn->setStyleSheet(Theme::tabButtonStyle());
+    m_tabTestBtn->setFixedHeight(32);
+    m_tabGroup->addButton(m_tabTestBtn, 3);
+    tabsLayout->addWidget(m_tabTestBtn);
+
+    connect(m_tabGroup, &QButtonGroup::idClicked, this, &BeatmapEditorWidget::handleTabChanged);
+    headerLayout->addWidget(tabsContainer);
+
+    headerLayout->addStretch(1);
+
+    // Map Title display in header
+    m_mapTitleLabel = new QLabel(QStringLiteral("Новая карта"), m_headerContainer);
+    m_mapTitleLabel->setStyleSheet(QStringLiteral(
+        "font-family: 'Segoe UI', sans-serif;"
+        "font-size: 13px;"
+        "font-weight: bold;"
+        "color: #ffffff;"
+        "padding: 0 8px;"
+    ));
+    headerLayout->addWidget(m_mapTitleLabel);
+
+    // Save Button
+    m_saveBtn = new QPushButton(QStringLiteral("Сохранить"), m_headerContainer);
+    m_saveBtn->setFocusPolicy(Qt::NoFocus);
+    m_saveBtn->setCursor(Qt::PointingHandCursor);
+    m_saveBtn->setStyleSheet(Theme::primaryButtonStyle());
+    m_saveBtn->setFixedSize(98, 32);
+    m_saveBtn->setToolTip(QStringLiteral("Сохранить карту (Ctrl+S)"));
+    m_saveBtn->setShortcut(QKeySequence::Save);
+    connect(m_saveBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleSaveMap);
+    headerLayout->addWidget(m_saveBtn);
+
+    // Export Button
+    m_exportBtn = new QPushButton(QStringLiteral("Экспорт"), m_headerContainer);
+    m_exportBtn->setFocusPolicy(Qt::NoFocus);
+    m_exportBtn->setCursor(Qt::PointingHandCursor);
+    m_exportBtn->setStyleSheet(Theme::secondaryButtonStyle());
+    m_exportBtn->setFixedSize(88, 32);
+    m_exportBtn->setToolTip(QStringLiteral("Экспортировать карту в файл .bkey"));
+    connect(m_exportBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleExportBkey);
+    headerLayout->addWidget(m_exportBtn);
+
+    m_saveStatusLabel = new QLabel(m_headerContainer);
+    m_saveStatusLabel->setStyleSheet(QStringLiteral("font-size: 11px; color: #2ecc71; font-weight: bold; margin-left: 4px;"));
+    m_saveStatusLabel->setVisible(false);
+    headerLayout->addWidget(m_saveStatusLabel);
+
+    rootLayout->addWidget(m_headerContainer);
+
+    // ========================================================================
+    // Top Bar 2: Editor Toolbar (Transport, Speed, Time, Undo/Redo, Tap Record, Help)
+    // Sits directly below the tabs header
+    // ========================================================================
+    m_editorToolbar = new QFrame(this);
+    m_editorToolbar->setStyleSheet(Theme::editorCardStyle());
+    m_editorToolbar->setFixedHeight(44);
+
+    auto *toolbarContainerLayout = new QVBoxLayout(m_editorToolbar);
+    toolbarContainerLayout->setContentsMargins(6, 4, 6, 4);
+    toolbarContainerLayout->setSpacing(0);
+
+    m_topScrollArea = new QScrollArea(m_editorToolbar);
     m_topScrollArea->setWidgetResizable(true);
     m_topScrollArea->setFrameShape(QFrame::NoFrame);
     m_topScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     m_topScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_topScrollArea->setFixedHeight(54);
     m_topScrollArea->setStyleSheet(QStringLiteral(
         "QScrollArea { background: transparent; border: none; }"
-        "QScrollBar:horizontal { background: rgba(20, 14, 34, 180); height: 6px; border-radius: 3px; margin: 0px; }"
-        "QScrollBar::handle:horizontal { background: #5a388f; border-radius: 3px; min-width: 28px; }"
-        "QScrollBar::handle:horizontal:hover { background: #a259ff; }"
+        "QScrollBar:horizontal { height: 4px; background: rgba(20, 14, 34, 180); border-radius: 2px; }"
+        "QScrollBar::handle:horizontal { background: #5a388f; border-radius: 2px; min-width: 20px; }"
         "QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0px; }"
     ));
-    m_topScrollArea->viewport()->installEventFilter(this);
 
-    auto *topScrollContent = new QWidget(m_topScrollArea);
-    topScrollContent->setStyleSheet(QStringLiteral("background: transparent;"));
-    auto *controlsRow = new QHBoxLayout(topScrollContent);
-    controlsRow->setContentsMargins(4, 2, 4, 8);
-    controlsRow->setSpacing(8);
-    controlsRow->setSizeConstraint(QLayout::SetMinimumSize);
+    auto *toolbarScrollContent = new QWidget(m_topScrollArea);
+    toolbarScrollContent->setStyleSheet(QStringLiteral("background: transparent;"));
+    auto *controlsRow = new QHBoxLayout(toolbarScrollContent);
+    controlsRow->setContentsMargins(0, 0, 0, 0);
+    controlsRow->setSpacing(6);
+    controlsRow->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
-    m_backBtn = new QPushButton(QStringLiteral("← В хаб карт"), topScrollContent);
-    m_backBtn->setFocusPolicy(Qt::NoFocus);
-    m_backBtn->setCursor(Qt::PointingHandCursor);
-    m_backBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    m_backBtn->setFixedSize(110, 32);
-    connect(m_backBtn, &QPushButton::clicked, this, [this]() {
-        AudioManager::instance().playClickSound();
-        stopPlayback();
-        emit backRequested();
-    });
-    controlsRow->addWidget(m_backBtn);
-
-    m_mapTitleLabel = new QLabel(QStringLiteral("Редактор карты"), topScrollContent);
-    m_mapTitleLabel->setStyleSheet(QStringLiteral(
-        "font-family: 'Segoe UI', sans-serif;"
-        "font-size: 14px;"
-        "font-weight: bold;"
-        "color: #ffffff;"
-        "padding: 0 4px;"
-    ));
-    m_mapTitleLabel->setFixedHeight(32);
-    controlsRow->addWidget(m_mapTitleLabel);
-
-    // Step Backward
-    m_stepBackBtn = new QPushButton(QStringLiteral("|◀"), topScrollContent);
+    // Playback Transport Controls
+    m_stepBackBtn = new QPushButton(QStringLiteral("◄◄"), toolbarScrollContent);
     m_stepBackBtn->setFocusPolicy(Qt::NoFocus);
     m_stepBackBtn->setCursor(Qt::PointingHandCursor);
     m_stepBackBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    m_stepBackBtn->setFixedSize(34, 32);
+    m_stepBackBtn->setFixedSize(36, 32);
     m_stepBackBtn->setToolTip(QStringLiteral("Шаг назад (←)"));
     connect(m_stepBackBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleStepBackward);
     controlsRow->addWidget(m_stepBackBtn);
 
-    // Play/Pause
-    m_playBtn = new QPushButton(QStringLiteral("▶ Плей"), topScrollContent);
+    m_playBtn = new QPushButton(QStringLiteral("▶"), toolbarScrollContent);
     m_playBtn->setFocusPolicy(Qt::NoFocus);
     m_playBtn->setCursor(Qt::PointingHandCursor);
     m_playBtn->setStyleSheet(Theme::primaryButtonStyle());
-    m_playBtn->setFixedSize(92, 32);
+    m_playBtn->setFixedSize(40, 32);
     m_playBtn->setToolTip(QStringLiteral("Воспроизведение / Пауза (Пробел)"));
     connect(m_playBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handlePlayPauseToggle);
     controlsRow->addWidget(m_playBtn);
 
-    // Step Forward
-    m_stepForwardBtn = new QPushButton(QStringLiteral("▶|"), topScrollContent);
+    m_stepForwardBtn = new QPushButton(QStringLiteral("►►"), toolbarScrollContent);
     m_stepForwardBtn->setFocusPolicy(Qt::NoFocus);
     m_stepForwardBtn->setCursor(Qt::PointingHandCursor);
     m_stepForwardBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    m_stepForwardBtn->setFixedSize(34, 32);
+    m_stepForwardBtn->setFixedSize(36, 32);
     m_stepForwardBtn->setToolTip(QStringLiteral("Шаг вперед (→)"));
     connect(m_stepForwardBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleStepForward);
     controlsRow->addWidget(m_stepForwardBtn);
 
-    // Stop
-    m_stopBtn = new QPushButton(QStringLiteral("■"), topScrollContent);
+    m_stopBtn = new QPushButton(QStringLiteral("■"), toolbarScrollContent);
     m_stopBtn->setFocusPolicy(Qt::NoFocus);
     m_stopBtn->setCursor(Qt::PointingHandCursor);
     m_stopBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    m_stopBtn->setFixedSize(34, 32);
+    m_stopBtn->setFixedSize(36, 32);
     m_stopBtn->setToolTip(QStringLiteral("Остановить"));
     connect(m_stopBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleStop);
     controlsRow->addWidget(m_stopBtn);
 
-    // Speed Selector (Card 35)
-    m_speedCombo = new QComboBox(topScrollContent);
+    m_speedCombo = new QComboBox(toolbarScrollContent);
+    m_speedCombo->addItem(QStringLiteral("0.5x"), 0.5);
+    m_speedCombo->addItem(QStringLiteral("0.75x"), 0.75);
+    m_speedCombo->addItem(QStringLiteral("1.0x"), 1.0);
+    m_speedCombo->setCurrentIndex(2);
     m_speedCombo->setFocusPolicy(Qt::NoFocus);
-    m_speedCombo->addItems({
-        QStringLiteral("0.25x"),
-        QStringLiteral("0.50x"),
-        QStringLiteral("0.75x"),
-        QStringLiteral("1.00x")
-    });
-    m_speedCombo->setCurrentIndex(3); // 1.00x
-    m_speedCombo->setStyleSheet(Theme::comboBoxStyle());
-    m_speedCombo->setFixedSize(74, 32);
     m_speedCombo->setCursor(Qt::PointingHandCursor);
-    m_speedCombo->setToolTip(QStringLiteral("Скорость воспроизведения трека"));
+    m_speedCombo->setFixedSize(68, 32);
+    m_speedCombo->setStyleSheet(Theme::comboBoxStyle());
     connect(m_speedCombo, &QComboBox::currentIndexChanged, this, &BeatmapEditorWidget::handleSpeedChanged);
     controlsRow->addWidget(m_speedCombo);
 
-    // Timecode display (Generous width to prevent truncation)
-    m_timeLabel = new QLabel(QStringLiteral("00:00.000 / 02:00.000"), topScrollContent);
-    m_timeLabel->setFixedSize(176, 32);
-    m_timeLabel->setAlignment(Qt::AlignCenter);
+    m_timeLabel = new QLabel(QStringLiteral("00:00.000 / 02:00.000"), toolbarScrollContent);
     m_timeLabel->setStyleSheet(QStringLiteral(
         "font-family: 'Consolas', 'Courier New', monospace;"
-        "font-size: 13px;"
+        "font-size: 11px;"
         "color: #bb9af7;"
-        "background: rgba(24, 16, 42, 180);"
-        "border: 1px solid #4a2d75;"
-        "border-radius: 4px;"
-        "padding: 4px 6px;"
+        "padding: 0 4px;"
     ));
     controlsRow->addWidget(m_timeLabel);
 
     controlsRow->addStretch(1);
 
     // Undo / Redo
-    m_undoBtn = new QPushButton(QStringLiteral("↺ Отмена"), topScrollContent);
+    m_undoBtn = new QPushButton(QStringLiteral("↺ Отмена"), toolbarScrollContent);
     m_undoBtn->setFocusPolicy(Qt::NoFocus);
     m_undoBtn->setCursor(Qt::PointingHandCursor);
     m_undoBtn->setStyleSheet(Theme::secondaryButtonStyle());
@@ -392,7 +645,7 @@ void BeatmapEditorWidget::setupUi()
     connect(m_undoBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleUndo);
     controlsRow->addWidget(m_undoBtn);
 
-    m_redoBtn = new QPushButton(QStringLiteral("↻ Повтор"), topScrollContent);
+    m_redoBtn = new QPushButton(QStringLiteral("↻ Повтор"), toolbarScrollContent);
     m_redoBtn->setFocusPolicy(Qt::NoFocus);
     m_redoBtn->setCursor(Qt::PointingHandCursor);
     m_redoBtn->setStyleSheet(Theme::secondaryButtonStyle());
@@ -402,8 +655,8 @@ void BeatmapEditorWidget::setupUi()
     connect(m_redoBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleRedo);
     controlsRow->addWidget(m_redoBtn);
 
-    // Tap Record button (Clean text, no emoji)
-    m_tapRecordBtn = new QPushButton(QStringLiteral("REC (R)"), topScrollContent);
+    // Tap Record button
+    m_tapRecordBtn = new QPushButton(QStringLiteral("REC (R)"), toolbarScrollContent);
     m_tapRecordBtn->setFocusPolicy(Qt::NoFocus);
     m_tapRecordBtn->setCheckable(true);
     m_tapRecordBtn->setCursor(Qt::PointingHandCursor);
@@ -414,7 +667,7 @@ void BeatmapEditorWidget::setupUi()
     controlsRow->addWidget(m_tapRecordBtn);
 
     // Help Button
-    m_helpBtn = new QPushButton(QStringLiteral("? Справка"), topScrollContent);
+    m_helpBtn = new QPushButton(QStringLiteral("? Справка"), toolbarScrollContent);
     m_helpBtn->setFocusPolicy(Qt::NoFocus);
     m_helpBtn->setCursor(Qt::PointingHandCursor);
     m_helpBtn->setStyleSheet(Theme::secondaryButtonStyle());
@@ -423,65 +676,37 @@ void BeatmapEditorWidget::setupUi()
     connect(m_helpBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleShowHelp);
     controlsRow->addWidget(m_helpBtn);
 
-    // Save Button
-    m_saveBtn = new QPushButton(QStringLiteral("Сохранить"), topScrollContent);
-    m_saveBtn->setFocusPolicy(Qt::NoFocus);
-    m_saveBtn->setCursor(Qt::PointingHandCursor);
-    m_saveBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    m_saveBtn->setFixedSize(98, 32);
-    m_saveBtn->setToolTip(QStringLiteral("Сохранить карту (Ctrl+S)"));
-    connect(m_saveBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleSaveMap);
-    controlsRow->addWidget(m_saveBtn);
-
-    // Export Button
-    m_exportBtn = new QPushButton(QStringLiteral("Экспорт"), topScrollContent);
-    m_exportBtn->setFocusPolicy(Qt::NoFocus);
-    m_exportBtn->setCursor(Qt::PointingHandCursor);
-    m_exportBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    m_exportBtn->setFixedSize(88, 32);
-    m_exportBtn->setToolTip(QStringLiteral("Экспортировать карту в файл .bkey"));
-    connect(m_exportBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleExportBkey);
-    controlsRow->addWidget(m_exportBtn);
-
-    m_topScrollArea->setWidget(topScrollContent);
-    topBarLayout->addWidget(m_topScrollArea);
-
-    // Row 2: Full-width Dedicated Scrub Slider (Spans 100% width)
-    auto *sliderRow = new QHBoxLayout();
-    sliderRow->setContentsMargins(0, 4, 0, 0);
-    sliderRow->setSpacing(8);
-
-    m_scrubSlider = new ClickableSlider(Qt::Horizontal, topBarContainer);
-    m_scrubSlider->setFocusPolicy(Qt::NoFocus);
-    m_scrubSlider->setRange(0, m_totalDurationMs);
-    m_scrubSlider->setValue(0);
-    m_scrubSlider->setCursor(Qt::PointingHandCursor);
-    m_scrubSlider->setStyleSheet(Theme::sliderStyle());
-    connect(m_scrubSlider, &QSlider::sliderMoved, this, &BeatmapEditorWidget::handleSliderMoved);
-    connect(m_scrubSlider, &QSlider::sliderReleased, this, &BeatmapEditorWidget::handleSliderReleased);
-    connect(m_scrubSlider, &QSlider::valueChanged, this, [this](int value) {
-        if (m_isScrubbing) {
-            handleSliderMoved(value);
-        }
-    });
-    sliderRow->addWidget(m_scrubSlider, 1);
-
-    m_saveStatusLabel = new QLabel(topBarContainer);
-    m_saveStatusLabel->setStyleSheet(QStringLiteral("font-size: 11px; color: #2ecc71; font-weight: bold;"));
-    m_saveStatusLabel->setVisible(false);
-    sliderRow->addWidget(m_saveStatusLabel);
-
-    topBarLayout->addLayout(sliderRow);
-    rootLayout->addWidget(topBarContainer);
+    m_topScrollArea->setWidget(toolbarScrollContent);
+    toolbarContainerLayout->addWidget(m_topScrollArea);
+    rootLayout->addWidget(m_editorToolbar);
 
     // ========================================================================
-    // Main Workspace: Left Toolstrip + Center Canvas + Right Properties Panel
+    // Stack of Sections: Editor, Description, Timing, Test
     // ========================================================================
-    auto *workLayout = new QHBoxLayout();
+    m_editorStack = new QStackedWidget(this);
+    m_editorStack->addWidget(createEditorPage());
+    m_editorStack->addWidget(createDescriptionPage());
+    m_editorStack->addWidget(createPlaceholderPage(
+        QStringLiteral("Раздел «Тайминг»"),
+        QStringLiteral("Раздел «Тайминг» будет доступен в будущем")
+    ));
+    m_editorStack->addWidget(createPlaceholderPage(
+        QStringLiteral("Раздел «Тестирование»"),
+        QStringLiteral("Раздел «Тестирование» будет доступен в будущем")
+    ));
+
+    rootLayout->addWidget(m_editorStack, 1);
+}
+
+QWidget* BeatmapEditorWidget::createEditorPage()
+{
+    auto *page = new QWidget(this);
+    auto *workLayout = new QHBoxLayout(page);
+    workLayout->setContentsMargins(0, 0, 0, 0);
     workLayout->setSpacing(10);
 
     // 1. Left Toolstrip (Keys 1 and 2)
-    auto *toolPanel = new QFrame(this);
+    auto *toolPanel = new QFrame(page);
     toolPanel->setStyleSheet(Theme::editorCardStyle());
     toolPanel->setFixedWidth(54);
 
@@ -505,7 +730,7 @@ void BeatmapEditorWidget::setupUi()
     m_placeToolBtn->setFixedSize(42, 38);
     m_placeToolBtn->setCursor(Qt::PointingHandCursor);
     m_placeToolBtn->setStyleSheet(Theme::toolButtonStyle());
-    m_placeToolBtn->setToolTip(QStringLiteral("Размещение нот (Клавиша 2)\nЗажмите ЛКМ и тяните: рисование\nЗажмите ПКМ и тяните: ластик"));
+    m_placeToolBtn->setToolTip(QStringLiteral("Размещение нот (Клавиша 2)"));
 
     m_toolGroup = new QButtonGroup(this);
     m_toolGroup->addButton(m_selectToolBtn, static_cast<int>(EditorTool::Select));
@@ -518,36 +743,60 @@ void BeatmapEditorWidget::setupUi()
     workLayout->addWidget(toolPanel);
 
     // 2. Center Timeline Canvas Container
-    auto *centerContainer = new QFrame(this);
+    auto *centerContainer = new QFrame(page);
     centerContainer->setStyleSheet(Theme::editorCardStyle());
     auto *centerLayout = new QVBoxLayout(centerContainer);
-    centerLayout->setContentsMargins(4, 4, 4, 6);
+    centerLayout->setContentsMargins(6, 6, 6, 6);
     centerLayout->setSpacing(4);
+
+    // Scrubber above notes canvas
+    m_scrubSlider = new ClickableSlider(Qt::Horizontal, centerContainer);
+    m_scrubSlider->setFocusPolicy(Qt::NoFocus);
+    m_scrubSlider->setRange(0, m_totalDurationMs);
+    m_scrubSlider->setValue(0);
+    m_scrubSlider->setCursor(Qt::PointingHandCursor);
+    m_scrubSlider->setStyleSheet(Theme::sliderStyle());
+    connect(m_scrubSlider, &QSlider::sliderPressed, this, [this]() {
+        m_isScrubbing = true;
+        m_userScrolledAway = true;
+    });
+    connect(m_scrubSlider, &QSlider::sliderMoved, this, &BeatmapEditorWidget::handleSliderMoved);
+    connect(m_scrubSlider, &QSlider::sliderReleased, this, &BeatmapEditorWidget::handleSliderReleased);
+    connect(m_scrubSlider, &QSlider::valueChanged, this, [this](int value) {
+        if (m_isScrubbing) {
+            handleSliderMoved(value);
+        }
+    });
+    centerLayout->addWidget(m_scrubSlider);
 
     m_timelineCanvas = new EditorTimelineCanvas(centerContainer);
     m_timelineCanvas->setWaveform(m_waveform);
     centerLayout->addWidget(m_timelineCanvas, 1);
 
-    // Horizontal Scrollbar synced with canvas (Card 33)
-    m_timelineScrollBar = new QScrollBar(Qt::Horizontal, centerContainer);
-    m_timelineScrollBar->setFocusPolicy(Qt::NoFocus);
-    m_timelineScrollBar->setStyleSheet(Theme::sliderStyle());
-    m_timelineScrollBar->setCursor(Qt::PointingHandCursor);
-    connect(m_timelineScrollBar, &QScrollBar::valueChanged, this, &BeatmapEditorWidget::handleCanvasScrollbarMoved);
-    centerLayout->addWidget(m_timelineScrollBar);
-
-    // Canvas Status Strip (Cursor Postprocessor, Measure, Beat, Zoom)
+    // Canvas Status Strip (Cursor, Notes Count, Zoom)
     auto *statusStrip = new QHBoxLayout();
     statusStrip->setContentsMargins(8, 2, 8, 2);
 
-    m_postprocessorLabel = new QLabel(QStringLiteral("Курсор: 00:00.000 | Такт 1, Доля 1.00"), centerContainer);
-    m_postprocessorLabel->setStyleSheet(QStringLiteral("color: #bb9af7; font-size: 11px; font-weight: bold;"));
+    m_postprocessorLabel = new QLabel(QStringLiteral("Курсор: 00:00.000 | Такт 1, Доля 1.00 | Сетка: 1/4"), centerContainer);
+    m_postprocessorLabel->setStyleSheet(QStringLiteral("color: #bb9af7; font-size: 11px; font-weight: bold; background: transparent; border: none;"));
     statusStrip->addWidget(m_postprocessorLabel);
 
     statusStrip->addStretch(1);
 
-    m_zoomLabel = new QLabel(QStringLiteral("Масштаб: 100% (Ctrl+Колесо)"), centerContainer);
-    m_zoomLabel->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
+    m_statusNotesCountLabel = new QLabel(QStringLiteral("Всего нот: 0"), centerContainer);
+    m_statusNotesCountLabel->setStyleSheet(QStringLiteral("color: #bb9af7; font-size: 11px; font-weight: bold; background: transparent; border: none;"));
+    statusStrip->addWidget(m_statusNotesCountLabel);
+
+    statusStrip->addStretch(1);
+
+    m_zoomLabel = new QLabel(QStringLiteral("Масштаб: 100%"), centerContainer);
+    m_zoomLabel->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px; background: transparent; border: none;"));
+    m_zoomLabel->setToolTip(QStringLiteral(
+        "Горячие клавиши управления таймлайном:\n"
+        "• Ctrl + Колёсико мыши — плавный масштаб\n"
+        "• Shift + Колёсико мыши — ускоренная прокрутка (в 2 раза быстрее)\n"
+        "• Колёсико мыши — горизонтальная прокрутка"
+    ));
     statusStrip->addWidget(m_zoomLabel);
 
     centerLayout->addLayout(statusStrip);
@@ -565,15 +814,15 @@ void BeatmapEditorWidget::setupUi()
     connect(m_timelineCanvas, &EditorTimelineCanvas::hoverInfoChanged, this, &BeatmapEditorWidget::handleHoverInfoChanged);
     connect(m_timelineCanvas, &EditorTimelineCanvas::zoomChanged, this, [this](double pxSec) {
         int zoomPercent = qRound((pxSec / 180.0) * 100.0);
-        m_zoomLabel->setText(QStringLiteral("Масштаб: %1% (Ctrl+Колесо)").arg(zoomPercent));
+        m_zoomLabel->setText(QStringLiteral("Масштаб: %1%").arg(zoomPercent));
     });
 
     workLayout->addWidget(centerContainer, 1);
 
-    // 3. Right Properties Panel wrapped inside a dedicated QScrollArea (Fixes layout clipping)
-    auto *rightPanelContainer = new QFrame(this);
+    // 3. Right Properties Panel
+    auto *rightPanelContainer = new QFrame(page);
     rightPanelContainer->setStyleSheet(Theme::editorCardStyle());
-    rightPanelContainer->setFixedWidth(310);
+    rightPanelContainer->setFixedWidth(290);
 
     auto *panelContainerLayout = new QVBoxLayout(rightPanelContainer);
     panelContainerLayout->setContentsMargins(4, 4, 4, 4);
@@ -583,13 +832,7 @@ void BeatmapEditorWidget::setupUi()
     m_rightScrollArea->setFrameShape(QFrame::NoFrame);
     m_rightScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_rightScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-    m_rightScrollArea->setStyleSheet(QStringLiteral(
-        "QScrollArea { background: transparent; border: none; }"
-        "QScrollBar:vertical { background: rgba(20, 14, 34, 180); width: 8px; border-radius: 4px; }"
-        "QScrollBar::handle:vertical { background: #5a388f; border-radius: 4px; min-height: 24px; }"
-        "QScrollBar::handle:vertical:hover { background: #a259ff; }"
-        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }"
-    ));
+    m_rightScrollArea->setStyleSheet(Theme::scrollAreaStyle());
 
     auto *scrollContent = new QWidget(m_rightScrollArea);
     scrollContent->setStyleSheet(QStringLiteral("background: transparent;"));
@@ -598,7 +841,7 @@ void BeatmapEditorWidget::setupUi()
     rightLayout->setSpacing(8);
     rightLayout->setAlignment(Qt::AlignTop);
 
-    auto *propTitle = new QLabel(QStringLiteral("Свойства и параметры"), scrollContent);
+    auto *propTitle = new QLabel(QStringLiteral("Параметры и инструменты"), scrollContent);
     propTitle->setStyleSheet(QStringLiteral(
         "font-family: 'Segoe UI', sans-serif;"
         "font-size: 15px;"
@@ -607,131 +850,9 @@ void BeatmapEditorWidget::setupUi()
     ));
     rightLayout->addWidget(propTitle);
 
-    // Section 1: Map Metadata
-    auto *metaSec = new QLabel(QStringLiteral("ПАРАМЕТРЫ КАРТЫ"), scrollContent);
-    metaSec->setStyleSheet(QStringLiteral("color: #bb9af7; font-size: 11px; font-weight: bold; margin-top: 4px;"));
-    rightLayout->addWidget(metaSec);
-
-    // Title (Mandatory)
-    auto *titleLbl = new QLabel(QStringLiteral("Название карты (обязательно):"), scrollContent);
-    titleLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
-    m_metaTitleEdit = new QLineEdit(scrollContent);
-    m_metaTitleEdit->setStyleSheet(Theme::lineEditStyle());
-    m_metaTitleEdit->setPlaceholderText(QStringLiteral("Название трека"));
-    connect(m_metaTitleEdit, &QLineEdit::textChanged, this, &BeatmapEditorWidget::handleTitleChanged);
-    rightLayout->addWidget(titleLbl);
-    rightLayout->addWidget(m_metaTitleEdit);
-
-    // Mapper (Mandatory)
-    auto *mapperLbl = new QLabel(QStringLiteral("Автор карты (обязательно):"), scrollContent);
-    mapperLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
-    m_metaMapperEdit = new QLineEdit(scrollContent);
-    m_metaMapperEdit->setStyleSheet(Theme::lineEditStyle());
-    m_metaMapperEdit->setPlaceholderText(QStringLiteral("Никнейм автора"));
-    connect(m_metaMapperEdit, &QLineEdit::textChanged, this, &BeatmapEditorWidget::handleMapperChanged);
-    rightLayout->addWidget(mapperLbl);
-    rightLayout->addWidget(m_metaMapperEdit);
-
-    // Artist (Optional)
-    auto *artistLbl = new QLabel(QStringLiteral("Исполнитель трека:"), scrollContent);
-    artistLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
-    m_metaArtistEdit = new QLineEdit(scrollContent);
-    m_metaArtistEdit->setStyleSheet(Theme::lineEditStyle());
-    m_metaArtistEdit->setPlaceholderText(QStringLiteral("Исполнитель музыки"));
-    connect(m_metaArtistEdit, &QLineEdit::textChanged, this, &BeatmapEditorWidget::handleArtistChanged);
-    rightLayout->addWidget(artistLbl);
-    rightLayout->addWidget(m_metaArtistEdit);
-
-    // Difficulty
-    auto *diffLbl = new QLabel(QStringLiteral("Сложность:"), scrollContent);
-    diffLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
-    m_metaDiffCombo = new QComboBox(scrollContent);
-    m_metaDiffCombo->addItems({
-        QStringLiteral("Легко"),
-        QStringLiteral("Нормально"),
-        QStringLiteral("Сложно"),
-        QStringLiteral("Эксперт"),
-        QStringLiteral("Мастер")
-    });
-    m_metaDiffCombo->setStyleSheet(Theme::comboBoxStyle());
-    connect(m_metaDiffCombo, &QComboBox::currentIndexChanged, this, &BeatmapEditorWidget::handleDifficultyChanged);
-    rightLayout->addWidget(diffLbl);
-    rightLayout->addWidget(m_metaDiffCombo);
-
-    // BPM
-    auto *bpmLbl = new QLabel(QStringLiteral("Темп (BPM, 30.0 - 300.0):"), scrollContent);
-    bpmLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
-    m_metaBpmSpin = new QDoubleSpinBox(scrollContent);
-    m_metaBpmSpin->setRange(30.0, 300.0);
-    m_metaBpmSpin->setValue(120.0);
-    m_metaBpmSpin->setSingleStep(1.0);
-    m_metaBpmSpin->setDecimals(1);
-    m_metaBpmSpin->setAlignment(Qt::AlignCenter);
-    m_metaBpmSpin->setStyleSheet(Theme::spinBoxStyle());
-    connect(m_metaBpmSpin, &QDoubleSpinBox::valueChanged, this, &BeatmapEditorWidget::handleBpmChanged);
-    rightLayout->addWidget(bpmLbl);
-    rightLayout->addWidget(m_metaBpmSpin);
-
-    // Audio Offset
-    auto *offsetLbl = new QLabel(QStringLiteral("Смещение первого такта (Offset, мс):"), scrollContent);
-    offsetLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
-    m_metaOffsetSpin = new QSpinBox(scrollContent);
-    m_metaOffsetSpin->setRange(-5000, 5000);
-    m_metaOffsetSpin->setValue(0);
-    m_metaOffsetSpin->setAlignment(Qt::AlignCenter);
-    m_metaOffsetSpin->setStyleSheet(Theme::spinBoxStyle());
-    connect(m_metaOffsetSpin, &QSpinBox::valueChanged, this, &BeatmapEditorWidget::handleOffsetChanged);
-    rightLayout->addWidget(offsetLbl);
-    rightLayout->addWidget(m_metaOffsetSpin);
-
-    // Choose Cover
-    auto *coverLbl = new QLabel(QStringLiteral("Обложка карты:"), scrollContent);
-    coverLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
-    rightLayout->addWidget(coverLbl);
-
-    auto *coverRow = new QHBoxLayout();
-    m_metaChooseCoverBtn = new QPushButton(QStringLiteral("Выбрать..."), scrollContent);
-    m_metaChooseCoverBtn->setFocusPolicy(Qt::NoFocus);
-    m_metaChooseCoverBtn->setCursor(Qt::PointingHandCursor);
-    m_metaChooseCoverBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    m_metaChooseCoverBtn->setFixedSize(90, 30);
-    connect(m_metaChooseCoverBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleChooseCover);
-
-    m_metaCoverLabel = new QLabel(QStringLiteral("Не выбрана"), scrollContent);
-    m_metaCoverLabel->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
-
-    coverRow->addWidget(m_metaChooseCoverBtn);
-    coverRow->addWidget(m_metaCoverLabel, 1);
-    rightLayout->addLayout(coverRow);
-
-    // Choose Audio
-    auto *audioLbl = new QLabel(QStringLiteral("Аудиофайл:"), scrollContent);
-    audioLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
-    rightLayout->addWidget(audioLbl);
-
-    auto *audioRow = new QHBoxLayout();
-    m_metaChooseAudioBtn = new QPushButton(QStringLiteral("Выбрать..."), scrollContent);
-    m_metaChooseAudioBtn->setFocusPolicy(Qt::NoFocus);
-    m_metaChooseAudioBtn->setCursor(Qt::PointingHandCursor);
-    m_metaChooseAudioBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    m_metaChooseAudioBtn->setFixedSize(90, 30);
-    connect(m_metaChooseAudioBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleChooseAudio);
-
-    m_metaAudioLabel = new QLabel(QStringLiteral("Не выбран"), scrollContent);
-    m_metaAudioLabel->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
-
-    audioRow->addWidget(m_metaChooseAudioBtn);
-    audioRow->addWidget(m_metaAudioLabel, 1);
-    rightLayout->addLayout(audioRow);
-
-    // Section 2: Quantization Grid Selector & Custom Integer Divisor
-    auto *sep1 = new QFrame(scrollContent);
-    sep1->setFrameShape(QFrame::HLine);
-    sep1->setStyleSheet(QStringLiteral("background: #5a388f; max-height: 1px;"));
-    rightLayout->addWidget(sep1);
-
+    // Section 1: Quantization Grid
     auto *quantSec = new QLabel(QStringLiteral("СЕТКА КВАНТОВАНИЯ"), scrollContent);
-    quantSec->setStyleSheet(QStringLiteral("color: #bb9af7; font-size: 11px; font-weight: bold;"));
+    quantSec->setStyleSheet(Theme::cardHeaderStyle());
     rightLayout->addWidget(quantSec);
 
     m_quantPresetCombo = new QComboBox(scrollContent);
@@ -744,17 +865,17 @@ void BeatmapEditorWidget::setupUi()
         QStringLiteral("1/16 такта (Шестнадцатая)"),
         QStringLiteral("Свой шаг (1/N такта)...")
     });
-    m_quantPresetCombo->setCurrentIndex(3); // 1/4 такта (четверть)
+    m_quantPresetCombo->setCurrentIndex(3);
     m_quantPresetCombo->setStyleSheet(Theme::comboBoxStyle());
     m_quantPresetCombo->setCursor(Qt::PointingHandCursor);
     connect(m_quantPresetCombo, &QComboBox::currentIndexChanged, this, &BeatmapEditorWidget::handleQuantPresetChanged);
     rightLayout->addWidget(m_quantPresetCombo);
 
-    // Custom Integer Divisor Spinbox (Allows user to enter any integer divisor 1 to 64)
     auto *customRow = new QHBoxLayout();
     auto *customLbl = new QLabel(QStringLiteral("Шаг доли 1/N (N):"), scrollContent);
-    customLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
+    customLbl->setStyleSheet(Theme::secondaryLabelStyle());
     m_quantCustomSpin = new QSpinBox(scrollContent);
+    m_quantCustomSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
     m_quantCustomSpin->setRange(1, 64);
     m_quantCustomSpin->setValue(4);
     m_quantCustomSpin->setAlignment(Qt::AlignCenter);
@@ -765,19 +886,19 @@ void BeatmapEditorWidget::setupUi()
     customRow->addWidget(m_quantCustomSpin);
     rightLayout->addLayout(customRow);
 
-    // Section 3: Selection Properties & Delete
+    // Section 2: Selection Properties & Delete
     auto *sep2 = new QFrame(scrollContent);
     sep2->setFrameShape(QFrame::HLine);
     sep2->setStyleSheet(QStringLiteral("background: #5a388f; max-height: 1px;"));
     rightLayout->addWidget(sep2);
 
     auto *selSec = new QLabel(QStringLiteral("СВОЙСТВА ВЫДЕЛЕНИЯ"), scrollContent);
-    selSec->setStyleSheet(QStringLiteral("color: #bb9af7; font-size: 11px; font-weight: bold;"));
+    selSec->setStyleSheet(Theme::cardHeaderStyle());
     rightLayout->addWidget(selSec);
 
     auto *selCountRow = new QHBoxLayout();
     auto *selCountText = new QLabel(QStringLiteral("Выделено нот:"), scrollContent);
-    selCountText->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
+    selCountText->setStyleSheet(Theme::secondaryLabelStyle());
     m_selCountLabel = new QLabel(QStringLiteral("0"), scrollContent);
     m_selCountLabel->setStyleSheet(QStringLiteral("color: #ffffff; font-size: 11px; font-weight: bold;"));
     selCountRow->addWidget(selCountText);
@@ -787,7 +908,7 @@ void BeatmapEditorWidget::setupUi()
 
     auto *selTimeRow = new QHBoxLayout();
     auto *selTimeText = new QLabel(QStringLiteral("Время удара:"), scrollContent);
-    selTimeText->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
+    selTimeText->setStyleSheet(Theme::secondaryLabelStyle());
     m_selTimeLabel = new QLabel(QStringLiteral("—"), scrollContent);
     m_selTimeLabel->setStyleSheet(QStringLiteral("color: #ffcc00; font-size: 11px; font-weight: bold;"));
     selTimeRow->addWidget(selTimeText);
@@ -804,21 +925,21 @@ void BeatmapEditorWidget::setupUi()
     connect(m_selDeleteBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleDeleteSelection);
     rightLayout->addWidget(m_selDeleteBtn);
 
-    // Section 4: Map Statistics
+    // Section 3: Map Statistics
     auto *sep3 = new QFrame(scrollContent);
     sep3->setFrameShape(QFrame::HLine);
     sep3->setStyleSheet(QStringLiteral("background: #5a388f; max-height: 1px;"));
     rightLayout->addWidget(sep3);
 
     auto *statSec = new QLabel(QStringLiteral("СТАТИСТИКА КАРТЫ"), scrollContent);
-    statSec->setStyleSheet(QStringLiteral("color: #bb9af7; font-size: 11px; font-weight: bold;"));
+    statSec->setStyleSheet(Theme::cardHeaderStyle());
     rightLayout->addWidget(statSec);
 
     auto *statRow1 = new QHBoxLayout();
     auto *totLbl = new QLabel(QStringLiteral("Всего нот:"), scrollContent);
-    totLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
+    totLbl->setStyleSheet(Theme::secondaryLabelStyle());
     m_statTotalNotes = new QLabel(QStringLiteral("0"), scrollContent);
-    m_statTotalNotes->setStyleSheet(QStringLiteral("color: #2ecc71; font-size: 11px; font-weight: bold;"));
+    m_statTotalNotes->setStyleSheet(Theme::accentLabelStyle());
     statRow1->addWidget(totLbl);
     statRow1->addStretch(1);
     statRow1->addWidget(m_statTotalNotes);
@@ -826,7 +947,7 @@ void BeatmapEditorWidget::setupUi()
 
     auto *statRow2 = new QHBoxLayout();
     auto *durLbl = new QLabel(QStringLiteral("Длительность:"), scrollContent);
-    durLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
+    durLbl->setStyleSheet(Theme::secondaryLabelStyle());
     m_statDuration = new QLabel(QStringLiteral("00:00"), scrollContent);
     m_statDuration->setStyleSheet(QStringLiteral("color: #ffffff; font-size: 11px; font-weight: bold;"));
     statRow2->addWidget(durLbl);
@@ -836,25 +957,578 @@ void BeatmapEditorWidget::setupUi()
 
     auto *statRow3 = new QHBoxLayout();
     auto *npsLbl = new QLabel(QStringLiteral("Плотность (NPS):"), scrollContent);
-    npsLbl->setStyleSheet(QStringLiteral("color: #a09cb0; font-size: 11px;"));
+    npsLbl->setStyleSheet(Theme::secondaryLabelStyle());
     m_statNps = new QLabel(QStringLiteral("0.0"), scrollContent);
-    m_statNps->setStyleSheet(QStringLiteral("color: #70d6ff; font-size: 11px; font-weight: bold;"));
+    m_statNps->setStyleSheet(QStringLiteral("color: #ffaa00; font-size: 11px; font-weight: bold;"));
     statRow3->addWidget(npsLbl);
     statRow3->addStretch(1);
     statRow3->addWidget(m_statNps);
     rightLayout->addLayout(statRow3);
 
-    rightLayout->addStretch(1);
     m_rightScrollArea->setWidget(scrollContent);
     panelContainerLayout->addWidget(m_rightScrollArea);
-
     workLayout->addWidget(rightPanelContainer);
-    rootLayout->addLayout(workLayout, 1);
+
+    return page;
+}
+
+QWidget* BeatmapEditorWidget::createDescriptionPage()
+{
+    auto *scrollArea = new QScrollArea(this);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setFrameShape(QFrame::NoFrame);
+    scrollArea->setStyleSheet(Theme::scrollAreaStyle());
+
+    auto *content = new QWidget(scrollArea);
+    content->setStyleSheet(QStringLiteral("background: transparent;"));
+    auto *mainLayout = new QVBoxLayout(content);
+    mainLayout->setContentsMargins(24, 20, 24, 24);
+    mainLayout->setSpacing(16);
+    mainLayout->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+
+    auto *headerLabel = new QLabel(QStringLiteral("Описание и метаданные карты"), content);
+    headerLabel->setStyleSheet(QStringLiteral("font-size: 20px; font-weight: bold; color: #ffffff; font-family: 'Segoe UI', sans-serif;"));
+    headerLabel->setAlignment(Qt::AlignCenter);
+    mainLayout->addWidget(headerLabel);
+
+    auto *cardsRow = new QHBoxLayout();
+    cardsRow->setSpacing(20);
+    cardsRow->setAlignment(Qt::AlignCenter);
+
+    // Left Card: Media & Visuals
+    auto *leftCard = new QFrame(content);
+    leftCard->setStyleSheet(Theme::editorCardStyle());
+    leftCard->setFixedWidth(360);
+    auto *leftLayout = new QVBoxLayout(leftCard);
+    leftLayout->setContentsMargins(18, 16, 18, 18);
+    leftLayout->setSpacing(12);
+
+    auto *mediaTitle = new QLabel(QStringLiteral("МЕДИАФАЙЛЫ И ОБЛОЖКА"), leftCard);
+    mediaTitle->setStyleSheet(Theme::cardHeaderStyle());
+    leftLayout->addWidget(mediaTitle);
+
+    m_descCoverPreview = new QLabel(leftCard);
+    m_descCoverPreview->setFixedSize(200, 200);
+    m_descCoverPreview->setAlignment(Qt::AlignCenter);
+    m_descCoverPreview->setStyleSheet(QStringLiteral(
+        "border: 2px solid #7d44cf; border-radius: 12px; background: rgba(20, 14, 34, 180);"
+    ));
+    auto *coverPreviewRow = new QHBoxLayout();
+    coverPreviewRow->setAlignment(Qt::AlignCenter);
+    coverPreviewRow->addWidget(m_descCoverPreview);
+    leftLayout->addLayout(coverPreviewRow);
+
+    m_metaChooseCoverBtn = new QPushButton(QStringLiteral("Выбрать обложку..."), leftCard);
+    m_metaChooseCoverBtn->setFocusPolicy(Qt::NoFocus);
+    m_metaChooseCoverBtn->setCursor(Qt::PointingHandCursor);
+    m_metaChooseCoverBtn->setStyleSheet(Theme::secondaryButtonStyle());
+    m_metaChooseCoverBtn->setFixedHeight(34);
+    connect(m_metaChooseCoverBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleChooseCover);
+    leftLayout->addWidget(m_metaChooseCoverBtn);
+
+    m_metaCoverLabel = new QLabel(QStringLiteral("Выбрана автоматическая обложка"), leftCard);
+    m_metaCoverLabel->setStyleSheet(Theme::secondaryLabelStyle());
+    m_metaCoverLabel->setAlignment(Qt::AlignCenter);
+    leftLayout->addWidget(m_metaCoverLabel);
+
+    auto *audioSep = new QFrame(leftCard);
+    audioSep->setFrameShape(QFrame::HLine);
+    audioSep->setStyleSheet(QStringLiteral("background: #5a388f; max-height: 1px;"));
+    leftLayout->addWidget(audioSep);
+
+    auto *audioHeading = new QLabel(QStringLiteral("АУДИОФАЙЛ КАРТЫ"), leftCard);
+    audioHeading->setStyleSheet(Theme::cardHeaderStyle());
+    leftLayout->addWidget(audioHeading);
+
+    m_metaChooseAudioBtn = new QPushButton(QStringLiteral("Выбрать аудио..."), leftCard);
+    m_metaChooseAudioBtn->setFocusPolicy(Qt::NoFocus);
+    m_metaChooseAudioBtn->setCursor(Qt::PointingHandCursor);
+    m_metaChooseAudioBtn->setStyleSheet(Theme::secondaryButtonStyle());
+    m_metaChooseAudioBtn->setFixedHeight(34);
+    connect(m_metaChooseAudioBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleChooseAudio);
+    leftLayout->addWidget(m_metaChooseAudioBtn);
+
+    m_descAudioPathLabel = new QLabel(QStringLiteral("Не выбран"), leftCard);
+    m_descAudioPathLabel->setStyleSheet(Theme::secondaryLabelStyle());
+    m_descAudioPathLabel->setWordWrap(true);
+    leftLayout->addWidget(m_descAudioPathLabel);
+
+    auto *dimSep = new QFrame(leftCard);
+    dimSep->setFrameShape(QFrame::HLine);
+    dimSep->setStyleSheet(QStringLiteral("background: #5a388f; max-height: 1px;"));
+    leftLayout->addWidget(dimSep);
+
+    auto *visualHeading = new QLabel(QStringLiteral("ВИЗУАЛЬНЫЕ НАСТРОЙКИ ФОНА"), leftCard);
+    visualHeading->setStyleSheet(Theme::cardHeaderStyle());
+    leftLayout->addWidget(visualHeading);
+
+    // 1. Background Dim Slider
+    auto *dimLbl = new QLabel(QStringLiteral("Затемнение фона (0% - 100%):"), leftCard);
+    dimLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    leftLayout->addWidget(dimLbl);
+
+    auto *dimRow = new QHBoxLayout();
+    m_descBgDimSlider = new ClickableSlider(Qt::Horizontal, leftCard);
+    m_descBgDimSlider->setRange(0, 100);
+    m_descBgDimSlider->setValue(m_backgroundDimPercent);
+    m_descBgDimSlider->setStyleSheet(Theme::sliderStyle());
+    m_descBgDimSlider->setToolTip(QStringLiteral("0% — яркий оригинальный фон, 100% — полностью черный фон"));
+    connect(m_descBgDimSlider, &QSlider::valueChanged, this, &BeatmapEditorWidget::handleBgDimSliderChanged);
+
+    m_descBgDimValLabel = new QLabel(QStringLiteral("%1%").arg(m_backgroundDimPercent), leftCard);
+    m_descBgDimValLabel->setStyleSheet(QStringLiteral("color: #bb9af7; font-weight: bold; min-width: 42px; background: transparent; border: none;"));
+    m_descBgDimValLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    dimRow->addWidget(m_descBgDimSlider, 1);
+    dimRow->addWidget(m_descBgDimValLabel);
+    leftLayout->addLayout(dimRow);
+
+    // 2. Background Blur Slider
+    auto *blurLbl = new QLabel(QStringLiteral("Размытие фона (0 - 20 px):"), leftCard);
+    blurLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    leftLayout->addWidget(blurLbl);
+
+    auto *blurRow = new QHBoxLayout();
+    m_descBgBlurSlider = new ClickableSlider(Qt::Horizontal, leftCard);
+    m_descBgBlurSlider->setRange(0, 20);
+    m_descBgBlurSlider->setValue(m_backgroundBlurRadius);
+    m_descBgBlurSlider->setStyleSheet(Theme::sliderStyle());
+    m_descBgBlurSlider->setToolTip(QStringLiteral("Размывает мелкие детали обложки для максимальной читаемости нот и звуковой волны"));
+    connect(m_descBgBlurSlider, &QSlider::valueChanged, this, &BeatmapEditorWidget::handleBgBlurSliderChanged);
+
+    m_descBgBlurValLabel = new QLabel(QStringLiteral("%1 px").arg(m_backgroundBlurRadius), leftCard);
+    m_descBgBlurValLabel->setStyleSheet(QStringLiteral("color: #bb9af7; font-weight: bold; min-width: 42px; background: transparent; border: none;"));
+    m_descBgBlurValLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    blurRow->addWidget(m_descBgBlurSlider, 1);
+    blurRow->addWidget(m_descBgBlurValLabel);
+    leftLayout->addLayout(blurRow);
+
+    // 3. Background Desaturation Slider
+    auto *desatLbl = new QLabel(QStringLiteral("Приглушение насыщенности (0% - 100%):"), leftCard);
+    desatLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    leftLayout->addWidget(desatLbl);
+
+    auto *desatRow = new QHBoxLayout();
+    m_descBgDesatSlider = new ClickableSlider(Qt::Horizontal, leftCard);
+    m_descBgDesatSlider->setRange(0, 100);
+    m_descBgDesatSlider->setValue(m_desaturationPercent);
+    m_descBgDesatSlider->setStyleSheet(Theme::sliderStyle());
+    m_descBgDesatSlider->setToolTip(QStringLiteral("Уменьшает цветность ярких фонов, чтобы они не перебивали фиолетовые и золотые акценты"));
+    connect(m_descBgDesatSlider, &QSlider::valueChanged, this, &BeatmapEditorWidget::handleBgDesatSliderChanged);
+
+    m_descBgDesatValLabel = new QLabel(QStringLiteral("%1%").arg(m_desaturationPercent), leftCard);
+    m_descBgDesatValLabel->setStyleSheet(QStringLiteral("color: #bb9af7; font-weight: bold; min-width: 42px; background: transparent; border: none;"));
+    m_descBgDesatValLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    desatRow->addWidget(m_descBgDesatSlider, 1);
+    desatRow->addWidget(m_descBgDesatValLabel);
+    leftLayout->addLayout(desatRow);
+
+    // 4. Vignette Slider
+    auto *vigLbl = new QLabel(QStringLiteral("Виньетка по краям (0% - 100%):"), leftCard);
+    vigLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    leftLayout->addWidget(vigLbl);
+
+    auto *vigRow = new QHBoxLayout();
+    m_descBgVignetteSlider = new ClickableSlider(Qt::Horizontal, leftCard);
+    m_descBgVignetteSlider->setRange(0, 100);
+    m_descBgVignetteSlider->setValue(m_vignettePercent);
+    m_descBgVignetteSlider->setStyleSheet(Theme::sliderStyle());
+    m_descBgVignetteSlider->setToolTip(QStringLiteral("Мягкое затемнение по краям и углам экрана для фокусировки внимания на нотах"));
+    connect(m_descBgVignetteSlider, &QSlider::valueChanged, this, &BeatmapEditorWidget::handleBgVignetteSliderChanged);
+
+    m_descBgVignetteValLabel = new QLabel(QStringLiteral("%1%").arg(m_vignettePercent), leftCard);
+    m_descBgVignetteValLabel->setStyleSheet(QStringLiteral("color: #bb9af7; font-weight: bold; min-width: 42px; background: transparent; border: none;"));
+    m_descBgVignetteValLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    vigRow->addWidget(m_descBgVignetteSlider, 1);
+    vigRow->addWidget(m_descBgVignetteValLabel);
+    leftLayout->addLayout(vigRow);
+
+    cardsRow->addWidget(leftCard);
+
+    // Right Card: Metadata Form
+    auto *rightCard = new QFrame(content);
+    rightCard->setStyleSheet(Theme::editorCardStyle());
+    rightCard->setFixedWidth(460);
+    auto *formLayout = new QVBoxLayout(rightCard);
+    formLayout->setContentsMargins(20, 16, 20, 18);
+    formLayout->setSpacing(10);
+
+    auto *metaTitle = new QLabel(QStringLiteral("СВЕДЕНИЯ О ТРЕКЕ"), rightCard);
+    metaTitle->setStyleSheet(Theme::cardHeaderStyle());
+    formLayout->addWidget(metaTitle);
+
+    // Title
+    auto *titleLbl = new QLabel(QStringLiteral("Название трека (Title):"), rightCard);
+    titleLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    m_metaTitleEdit = new QLineEdit(rightCard);
+    m_metaTitleEdit->setStyleSheet(Theme::lineEditStyle());
+    m_metaTitleEdit->setPlaceholderText(QStringLiteral("Название трека"));
+    connect(m_metaTitleEdit, &QLineEdit::textChanged, this, &BeatmapEditorWidget::handleTitleChanged);
+    formLayout->addWidget(titleLbl);
+    formLayout->addWidget(m_metaTitleEdit);
+
+    // Artist
+    auto *artistLbl = new QLabel(QStringLiteral("Исполнитель (Artist):"), rightCard);
+    artistLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    m_metaArtistEdit = new QLineEdit(rightCard);
+    m_metaArtistEdit->setStyleSheet(Theme::lineEditStyle());
+    m_metaArtistEdit->setPlaceholderText(QStringLiteral("Исполнитель композиции"));
+    connect(m_metaArtistEdit, &QLineEdit::textChanged, this, &BeatmapEditorWidget::handleArtistChanged);
+    formLayout->addWidget(artistLbl);
+    formLayout->addWidget(m_metaArtistEdit);
+
+    // Mapper
+    auto *mapperLbl = new QLabel(QStringLiteral("Автор карты (Mapper):"), rightCard);
+    mapperLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    m_metaMapperEdit = new QLineEdit(rightCard);
+    m_metaMapperEdit->setStyleSheet(Theme::lineEditStyle());
+    m_metaMapperEdit->setPlaceholderText(QStringLiteral("Никнейм картодела"));
+    connect(m_metaMapperEdit, &QLineEdit::textChanged, this, &BeatmapEditorWidget::handleMapperChanged);
+    formLayout->addWidget(mapperLbl);
+    formLayout->addWidget(m_metaMapperEdit);
+
+    // Difficulty
+    auto *diffLbl = new QLabel(QStringLiteral("Сложность карты:"), rightCard);
+    diffLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    m_metaDiffCombo = new QComboBox(rightCard);
+    m_metaDiffCombo->addItems({
+        QStringLiteral("Легкая"),
+        QStringLiteral("Нормальная"),
+        QStringLiteral("Сложная"),
+        QStringLiteral("Эксперт"),
+        QStringLiteral("Безумная")
+    });
+    m_metaDiffCombo->setStyleSheet(Theme::comboBoxStyle());
+    m_metaDiffCombo->setCursor(Qt::PointingHandCursor);
+    connect(m_metaDiffCombo, &QComboBox::currentIndexChanged, this, &BeatmapEditorWidget::handleDifficultyChanged);
+    formLayout->addWidget(diffLbl);
+    formLayout->addWidget(m_metaDiffCombo);
+
+    // BPM & Offset Row
+    auto *tempoRow = new QHBoxLayout();
+    tempoRow->setSpacing(14);
+
+    auto *bpmCol = new QVBoxLayout();
+    auto *bpmLbl = new QLabel(QStringLiteral("Темп (BPM):"), rightCard);
+    bpmLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    m_metaBpmSpin = new QDoubleSpinBox(rightCard);
+    m_metaBpmSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_metaBpmSpin->setRange(30.0, 300.0);
+    m_metaBpmSpin->setValue(120.0);
+    m_metaBpmSpin->setSingleStep(1.0);
+    m_metaBpmSpin->setAlignment(Qt::AlignCenter);
+    m_metaBpmSpin->setStyleSheet(Theme::spinBoxStyle());
+    connect(m_metaBpmSpin, &QDoubleSpinBox::valueChanged, this, &BeatmapEditorWidget::handleBpmChanged);
+    bpmCol->addWidget(bpmLbl);
+    bpmCol->addWidget(m_metaBpmSpin);
+    tempoRow->addLayout(bpmCol, 1);
+
+    auto *offsetCol = new QVBoxLayout();
+    auto *offsetLbl = new QLabel(QStringLiteral("Смещение (Offset, мс):"), rightCard);
+    offsetLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    m_metaOffsetSpin = new QSpinBox(rightCard);
+    m_metaOffsetSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_metaOffsetSpin->setRange(-5000, 5000);
+    m_metaOffsetSpin->setValue(0);
+    m_metaOffsetSpin->setAlignment(Qt::AlignCenter);
+    m_metaOffsetSpin->setStyleSheet(Theme::spinBoxStyle());
+    connect(m_metaOffsetSpin, &QSpinBox::valueChanged, this, &BeatmapEditorWidget::handleOffsetChanged);
+    offsetCol->addWidget(offsetLbl);
+    offsetCol->addWidget(m_metaOffsetSpin);
+    tempoRow->addLayout(offsetCol, 1);
+
+    formLayout->addLayout(tempoRow);
+
+    // Duration Row (Seconds with Auto-detect button)
+    auto *durCol = new QVBoxLayout();
+    auto *durLbl = new QLabel(QStringLiteral("Длительность карты (сек):"), rightCard);
+    durLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    durCol->addWidget(durLbl);
+
+    auto *durControlRow = new QHBoxLayout();
+    durControlRow->setSpacing(8);
+
+    m_metaDurationSpin = new QSpinBox(rightCard);
+    m_metaDurationSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_metaDurationSpin->setRange(5, 3600);
+    m_metaDurationSpin->setValue(m_totalDurationMs / 1000);
+    m_metaDurationSpin->setAlignment(Qt::AlignCenter);
+    m_metaDurationSpin->setStyleSheet(Theme::spinBoxStyle());
+    m_metaDurationSpin->setToolTip(QStringLiteral("Общая длительность карты. Автоматически рассчитывается по треку и нотам, но может быть изменена вручную."));
+    connect(m_metaDurationSpin, &QSpinBox::editingFinished, this, [this]() {
+        m_isDurationManuallyEdited = true;
+        setMapDuration(m_metaDurationSpin->value() * 1000);
+    });
+    durControlRow->addWidget(m_metaDurationSpin, 1);
+
+    m_autoDurationBtn = new QPushButton(QStringLiteral("Авто"), rightCard);
+    m_autoDurationBtn->setFocusPolicy(Qt::NoFocus);
+    m_autoDurationBtn->setCursor(Qt::PointingHandCursor);
+    m_autoDurationBtn->setStyleSheet(Theme::secondaryButtonStyle());
+    m_autoDurationBtn->setMinimumSize(76, 32);
+    m_autoDurationBtn->setToolTip(QStringLiteral("Автоматически рассчитать длительность по аудиофайлу и последней ноте"));
+    connect(m_autoDurationBtn, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        recalculateMapDuration(m_audioDurationMs);
+    });
+    durControlRow->addWidget(m_autoDurationBtn);
+
+    durCol->addLayout(durControlRow);
+    formLayout->addLayout(durCol);
+    formLayout->addStretch(1);
+
+    cardsRow->addWidget(rightCard);
+    mainLayout->addLayout(cardsRow);
+    mainLayout->addStretch(1);
+
+    scrollArea->setWidget(content);
+    return scrollArea;
+}
+
+QWidget* BeatmapEditorWidget::createPlaceholderPage(const QString &title, const QString &subtitle)
+{
+    auto *page = new QWidget(this);
+    auto *layout = new QVBoxLayout(page);
+    layout->setAlignment(Qt::AlignCenter);
+
+    auto *card = new QFrame(page);
+    card->setStyleSheet(Theme::editorCardStyle());
+    card->setFixedSize(480, 240);
+
+    auto *cardLayout = new QVBoxLayout(card);
+    cardLayout->setAlignment(Qt::AlignCenter);
+    cardLayout->setSpacing(14);
+    cardLayout->setContentsMargins(24, 24, 24, 24);
+
+    auto *titleLbl = new QLabel(title, card);
+    titleLbl->setStyleSheet(QStringLiteral("font-size: 20px; font-weight: bold; color: #ffffff; font-family: 'Segoe UI', sans-serif;"));
+    titleLbl->setAlignment(Qt::AlignCenter);
+    cardLayout->addWidget(titleLbl);
+
+    auto *subLbl = new QLabel(subtitle, card);
+    subLbl->setStyleSheet(QStringLiteral("font-size: 14px; color: #a09cb0; font-family: 'Segoe UI', sans-serif;"));
+    subLbl->setAlignment(Qt::AlignCenter);
+    cardLayout->addWidget(subLbl);
+
+    auto *backBtn = new QPushButton(QStringLiteral("← Перейти в редактор"), card);
+    backBtn->setFocusPolicy(Qt::NoFocus);
+    backBtn->setCursor(Qt::PointingHandCursor);
+    backBtn->setStyleSheet(Theme::secondaryButtonStyle());
+    backBtn->setFixedSize(200, 36);
+    connect(backBtn, &QPushButton::clicked, this, [this]() {
+        m_tabEditorBtn->setChecked(true);
+        handleTabChanged(0);
+    });
+    cardLayout->addWidget(backBtn, 0, Qt::AlignCenter);
+
+    layout->addWidget(card);
+    return page;
+}
+
+void BeatmapEditorWidget::updateCoverPreview()
+{
+    if (!m_descCoverPreview) return;
+
+    QPixmap pix = m_currentBeatmap.coverImage;
+    if (pix.isNull() && !m_sourceCoverPath.isEmpty() && QFile::exists(m_sourceCoverPath)) {
+        m_currentBeatmap.coverImage.load(m_sourceCoverPath);
+        pix = m_currentBeatmap.coverImage;
+    }
+    if (pix.isNull()) {
+        static QPixmap defaultBg(QStringLiteral(":/assets/images/standard_bg2.jpg"));
+        pix = defaultBg;
+    }
+
+    if (!pix.isNull()) {
+        QPixmap scaled = pix.scaled(200, 200, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+        int cx = (scaled.width() - 200) / 2;
+        int cy = (scaled.height() - 200) / 2;
+        QPixmap cropped = scaled.copy(cx, cy, 200, 200);
+        m_descCoverPreview->setPixmap(cropped);
+    } else {
+        m_descCoverPreview->clear();
+        m_descCoverPreview->setText(QStringLiteral("Нет обложки"));
+    }
+}
+
+void BeatmapEditorWidget::handleTabChanged(int index)
+{
+    AudioManager::instance().playClickSound();
+    m_editorStack->setCurrentIndex(index);
+    if (m_editorToolbar) {
+        m_editorToolbar->setVisible(index == 0);
+    }
+    if (index == 0) {
+        m_timelineCanvas->setFocus();
+    } else if (index == 1) {
+        updateCoverPreview();
+    }
+}
+
+void BeatmapEditorWidget::updateStatusNotesCount()
+{
+    if (!m_statusNotesCountLabel) return;
+    int total = m_currentBeatmap.notes.size();
+    int selCount = m_timelineCanvas ? m_timelineCanvas->selectedNoteIndices().size() : 0;
+    if (selCount > 0) {
+        m_statusNotesCountLabel->setText(QStringLiteral("Всего нот: %1 | Выделено: %2").arg(total).arg(selCount));
+    } else {
+        m_statusNotesCountLabel->setText(QStringLiteral("Всего нот: %1").arg(total));
+    }
+}
+
+void BeatmapEditorWidget::handleBgDimSliderChanged(int value)
+{
+    m_backgroundDimPercent = qBound(0, value, 100);
+    if (m_descBgDimValLabel) {
+        m_descBgDimValLabel->setText(QStringLiteral("%1%").arg(m_backgroundDimPercent));
+    }
+    update();
+}
+
+void BeatmapEditorWidget::handleBgBlurSliderChanged(int value)
+{
+    m_backgroundBlurRadius = qBound(0, value, 20);
+    if (m_descBgBlurValLabel) {
+        m_descBgBlurValLabel->setText(QStringLiteral("%1 px").arg(m_backgroundBlurRadius));
+    }
+    updateCachedBackground();
+    update();
+}
+
+void BeatmapEditorWidget::handleBgDesatSliderChanged(int value)
+{
+    m_desaturationPercent = qBound(0, value, 100);
+    if (m_descBgDesatValLabel) {
+        m_descBgDesatValLabel->setText(QStringLiteral("%1%").arg(m_desaturationPercent));
+    }
+    updateCachedBackground();
+    update();
+}
+
+void BeatmapEditorWidget::handleBgVignetteSliderChanged(int value)
+{
+    m_vignettePercent = qBound(0, value, 100);
+    if (m_descBgVignetteValLabel) {
+        m_descBgVignetteValLabel->setText(QStringLiteral("%1%").arg(m_vignettePercent));
+    }
+    update();
+}
+bool BeatmapEditorWidget::isMetadataModified() const
+{
+    if (m_currentBeatmap.meta.title != m_initialMeta.title) return true;
+    if (m_currentBeatmap.meta.artist != m_initialMeta.artist) return true;
+    if (m_currentBeatmap.meta.mapper != m_initialMeta.mapper) return true;
+    if (m_currentBeatmap.meta.difficultyName != m_initialMeta.difficultyName) return true;
+    if (qAbs(m_currentBeatmap.meta.bpm - m_initialMeta.bpm) > 0.001) return true;
+    if (m_currentBeatmap.meta.audioOffset != m_initialMeta.audioOffset) return true;
+    if (m_sourceCoverPath != m_initialCoverPath) return true;
+    if (m_sourceAudioPath != m_initialAudioPath) return true;
+    if (m_isDurationManuallyEdited && m_initialDurationMs > 0 && m_totalDurationMs != m_initialDurationMs) return true;
+    return false;
+}
+
+bool BeatmapEditorWidget::hasUnsavedChanges() const
+{
+    return isMetadataModified() || !m_undoStack.isClean();
+}
+
+bool BeatmapEditorWidget::maybeSaveAndExit()
+{
+    if (!hasUnsavedChanges()) {
+        emit backRequested();
+        return true;
+    }
+
+    SavePromptDialog dialog(this);
+    if (dialog.exec() == QDialog::Accepted) {
+        if (dialog.promptResult() == SavePromptDialog::Result::Save) {
+            QString validationError;
+            if (!validateMapData(&validationError)) {
+                QMessageBox::warning(this, QStringLiteral("Ошибка проверки структуры карты"), validationError);
+                return false;
+            }
+            handleSaveMap();
+            emit backRequested();
+            return true;
+        } else if (dialog.promptResult() == SavePromptDialog::Result::Discard) {
+            emit backRequested();
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void BeatmapEditorWidget::handleBackButtonClicked()
+{
+    AudioManager::instance().playClickSound();
+    maybeSaveAndExit();
+}
+
+int BeatmapEditorWidget::calculateLastNoteTime() const
+{
+    int lastTime = 0;
+    for (const auto &n : m_currentBeatmap.notes) {
+        if (n.timeMs > lastTime) {
+            lastTime = n.timeMs;
+        }
+    }
+    return lastTime;
+}
+
+void BeatmapEditorWidget::recalculateMapDuration(int audioDurationMs)
+{
+    if (audioDurationMs > 0) {
+        m_audioDurationMs = audioDurationMs;
+    }
+
+    int lastNoteMs = calculateLastNoteTime();
+    int minDurationByNotes = (lastNoteMs > 0) ? (lastNoteMs + 1000) : 0;
+
+    // Automatic map duration: max between audio duration, notes duration, and 10 seconds minimum
+    int targetDuration = std::max({ m_audioDurationMs, minDurationByNotes, 10000 });
+
+    setMapDuration(targetDuration);
+}
+
+void BeatmapEditorWidget::setMapDuration(int durationMs)
+{
+    int lastNoteMs = calculateLastNoteTime();
+    // Ensure we never cut off existing notes (give at least 500ms breathing room past last note)
+    int clamped = std::max({ durationMs, lastNoteMs + (lastNoteMs > 0 ? 500 : 0), 5000 });
+
+    m_totalDurationMs = clamped;
+    m_timelineCanvas->setTotalDuration(m_totalDurationMs);
+
+    if (m_scrubSlider) {
+        m_scrubSlider->setRange(0, m_totalDurationMs);
+    }
+    if (m_metaDurationSpin) {
+        m_metaDurationSpin->blockSignals(true);
+        m_metaDurationSpin->setValue(m_totalDurationMs / 1000);
+        m_metaDurationSpin->blockSignals(false);
+    }
+
+    updateTimeDisplay(static_cast<int>(m_mediaPlayer->position()));
+    updateStats();
+    update();
 }
 
 void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &audioPath, const QString &coverPath)
 {
     stopPlayback();
+    if (m_tabEditorBtn) {
+        m_tabEditorBtn->setChecked(true);
+    }
+    if (m_editorStack) {
+        m_editorStack->setCurrentIndex(0);
+    }
+    if (m_editorToolbar) {
+        m_editorToolbar->setVisible(true);
+    }
+    if (m_timelineCanvas) {
+        m_timelineCanvas->setFocus();
+    }
     m_undoStack.clear();
 
     m_currentBeatmap = beatmap;
@@ -871,19 +1545,59 @@ void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &aud
         m_metaDiffCombo->setCurrentIndex(diffIdx);
     }
 
+    if (m_currentBeatmap.meta.bpm <= 0.0) {
+        m_currentBeatmap.meta.bpm = 120.0;
+    }
     m_metaBpmSpin->setValue(m_currentBeatmap.meta.bpm);
     m_metaOffsetSpin->setValue(m_currentBeatmap.meta.audioOffset);
 
-    if (!m_sourceCoverPath.isEmpty()) {
-        m_metaCoverLabel->setText(QFileInfo(m_sourceCoverPath).fileName());
-    } else {
-        m_metaCoverLabel->setText(QStringLiteral("Не выбрана"));
+    if (m_descBgDimSlider) {
+        m_descBgDimSlider->setValue(m_backgroundDimPercent);
+    }
+    if (m_descBgDimValLabel) {
+        m_descBgDimValLabel->setText(QStringLiteral("%1%").arg(m_backgroundDimPercent));
+    }
+    if (m_descBgBlurSlider) {
+        m_descBgBlurSlider->setValue(m_backgroundBlurRadius);
+    }
+    if (m_descBgBlurValLabel) {
+        m_descBgBlurValLabel->setText(QStringLiteral("%1 px").arg(m_backgroundBlurRadius));
+    }
+    if (m_descBgDesatSlider) {
+        m_descBgDesatSlider->setValue(m_desaturationPercent);
+    }
+    if (m_descBgDesatValLabel) {
+        m_descBgDesatValLabel->setText(QStringLiteral("%1%").arg(m_desaturationPercent));
+    }
+    if (m_descBgVignetteSlider) {
+        m_descBgVignetteSlider->setValue(m_vignettePercent);
+    }
+    if (m_descBgVignetteValLabel) {
+        m_descBgVignetteValLabel->setText(QStringLiteral("%1%").arg(m_vignettePercent));
+    }
+    updateCachedBackground();
+    updateStatusNotesCount();
+    if (m_descAudioPathLabel) {
+        m_descAudioPathLabel->setText(m_currentBeatmap.meta.audioFileName.isEmpty()
+            ? QStringLiteral("Не выбран")
+            : m_currentBeatmap.meta.audioFileName);
+    }
+    updateCoverPreview();
+
+    if (m_metaCoverLabel) {
+        if (!m_sourceCoverPath.isEmpty()) {
+            m_metaCoverLabel->setText(QFileInfo(m_sourceCoverPath).fileName());
+        } else {
+            m_metaCoverLabel->setText(QStringLiteral("Выбрана автоматическая обложка"));
+        }
     }
 
-    if (!m_sourceAudioPath.isEmpty()) {
-        m_metaAudioLabel->setText(QFileInfo(m_sourceAudioPath).fileName());
-    } else {
-        m_metaAudioLabel->setText(QStringLiteral("Не выбран"));
+    if (m_metaAudioLabel) {
+        if (!m_sourceAudioPath.isEmpty()) {
+            m_metaAudioLabel->setText(QFileInfo(m_sourceAudioPath).fileName());
+        } else {
+            m_metaAudioLabel->setText(QStringLiteral("Не выбран"));
+        }
     }
 
     QString titleText = m_currentBeatmap.meta.title.isEmpty()
@@ -907,12 +1621,26 @@ void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &aud
     m_timelineCanvas->setBpm(m_currentBeatmap.meta.bpm);
     m_timelineCanvas->setAudioOffset(m_currentBeatmap.meta.audioOffset);
     m_timelineCanvas->setCurrentTime(0);
+    m_userScrolledAway = false;
+    m_isAutoScrolling = false;
+    m_timelineCanvas->setScrollTime(0);
     m_timelineCanvas->clearSelection();
+
+    recalculateMapDuration(m_audioDurationMs);
 
     m_scrubSlider->setValue(0);
     updateTimeDisplay(0);
     updatePropertiesPanel();
     updateStats();
+
+    m_initialMeta = m_currentBeatmap.meta;
+    m_initialCoverPath = m_sourceCoverPath;
+    m_initialAudioPath = m_sourceAudioPath;
+    m_initialDurationMs = m_totalDurationMs;
+    m_isDurationManuallyEdited = false;
+    m_isMetadataModified = false;
+    m_undoStack.clear();
+    m_undoStack.setClean();
 }
 
 void BeatmapEditorWidget::stopPlayback()
@@ -923,8 +1651,13 @@ void BeatmapEditorWidget::stopPlayback()
     m_clockBaseMs = 0;
     m_lastMediaPos = 0;
     m_timelineCanvas->setCurrentTime(0);
+    m_userScrolledAway = false;
+    m_playheadInViewMs = 0;
+    m_isAutoScrolling = true;
+    m_timelineCanvas->setScrollTime(0);
+    m_isAutoScrolling = false;
     m_scrubSlider->setValue(0);
-    m_playBtn->setText(QStringLiteral("▶ Плей"));
+    m_playBtn->setText(QStringLiteral("▶"));
     updateTimeDisplay(0);
 }
 
@@ -934,6 +1667,21 @@ void BeatmapEditorWidget::handlePlayPauseToggle()
     if (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState) {
         m_mediaPlayer->pause();
     } else {
+        m_userScrolledAway = false;
+        m_playheadInViewMs = 0;
+        int currentMs = static_cast<int>(m_mediaPlayer->position());
+        double w = m_timelineCanvas->width();
+        double pxPerMs = m_timelineCanvas->pixelsPerSecond() / 1000.0;
+        double playheadX = m_timelineCanvas->timeToX(currentMs);
+
+        // If red line is currently outside the normal viewing zone, page it into view at 15% from left
+        if (w > 100 && pxPerMs > 0.0001 && (playheadX < 0 || playheadX > 0.85 * w)) {
+            int newScroll = qMax(0, currentMs - static_cast<int>((0.15 * w) / pxPerMs));
+            m_isAutoScrolling = true;
+            m_timelineCanvas->setScrollTime(newScroll);
+            m_isAutoScrolling = false;
+        }
+
         m_mediaPlayer->play();
     }
 }
@@ -979,22 +1727,15 @@ void BeatmapEditorWidget::handleSpeedChanged(int index)
 void BeatmapEditorWidget::handleSliderMoved(int position)
 {
     m_isScrubbing = true;
-    m_timelineCanvas->setCurrentTime(position);
-    updateTimeDisplay(position);
+    m_userScrolledAway = true;
+    m_timelineCanvas->setScrollTime(position);
 }
 
 void BeatmapEditorWidget::handleSliderReleased()
 {
     m_isScrubbing = false;
-    int targetMs = m_scrubSlider->value();
-    m_clockBaseMs = targetMs;
-    m_lastMediaPos = targetMs;
-    if (m_audioClock.isValid()) {
-        m_audioClock.restart();
-    }
-    m_mediaPlayer->setPosition(targetMs);
-    m_timelineCanvas->setCurrentTime(targetMs);
-    updateTimeDisplay(targetMs);
+    m_userScrolledAway = true;
+    m_timelineCanvas->setScrollTime(m_scrubSlider->value());
 }
 
 void BeatmapEditorWidget::handleSeekRequested(int timeMs)
@@ -1005,32 +1746,43 @@ void BeatmapEditorWidget::handleSeekRequested(int timeMs)
         m_audioClock.restart();
     }
     m_timelineCanvas->setCurrentTime(timeMs);
-    m_scrubSlider->setValue(timeMs);
     m_mediaPlayer->setPosition(timeMs);
     updateTimeDisplay(timeMs);
+
+    m_userScrolledAway = false;
+    m_playheadInViewMs = 0;
+    double w = m_timelineCanvas->width();
+    double pxPerMs = m_timelineCanvas->pixelsPerSecond() / 1000.0;
+    double playheadX = m_timelineCanvas->timeToX(timeMs);
+
+    // If seeking puts red line outside normal viewing zone, page it into view at 15% from left
+    if (w > 100 && pxPerMs > 0.0001 && (playheadX < 0 || playheadX > 0.85 * w)) {
+        int newScroll = qMax(0, timeMs - static_cast<int>((0.15 * w) / pxPerMs));
+        m_isAutoScrolling = true;
+        m_timelineCanvas->setScrollTime(newScroll);
+        m_isAutoScrolling = false;
+    }
 }
 
 void BeatmapEditorWidget::handleScrollChanged(int scrollTimeMs, int totalDurationMs, int visibleMs)
 {
-    m_timelineScrollBar->blockSignals(true);
-    int maxScroll = qMax(0, totalDurationMs - visibleMs);
-    m_timelineScrollBar->setRange(0, maxScroll);
-    m_timelineScrollBar->setPageStep(visibleMs);
-    m_timelineScrollBar->setValue(scrollTimeMs);
-    m_timelineScrollBar->blockSignals(false);
-}
-
-void BeatmapEditorWidget::handleCanvasScrollbarMoved(int value)
-{
-    m_timelineCanvas->setScrollTime(value);
+    Q_UNUSED(visibleMs);
+    if (!m_isAutoScrolling) {
+        m_userScrolledAway = true;
+    }
+    if (m_totalDurationMs > 0 && m_scrubSlider && !m_isScrubbing) {
+        m_scrubSlider->blockSignals(true);
+        m_scrubSlider->setRange(0, totalDurationMs);
+        m_scrubSlider->setValue(scrollTimeMs);
+        m_scrubSlider->blockSignals(false);
+    }
 }
 
 void BeatmapEditorWidget::handleHoverInfoChanged(int timeMs, int measure, double beatInMeasure)
 {
     QString timeStr = formatMsToTime(timeMs);
-    m_postprocessorLabel->setText(QStringLiteral("Курсор: %1 (%2 мс) | Такт %3, Доля %4 | Сетка: 1/%5")
+    m_postprocessorLabel->setText(QStringLiteral("Курсор: %1 | Такт %2, Доля %3 | Сетка: 1/%4")
         .arg(timeStr)
-        .arg(timeMs)
         .arg(measure)
         .arg(QString::number(beatInMeasure, 'f', 2))
         .arg(m_quantCustomSpin->value()));
@@ -1125,6 +1877,7 @@ void BeatmapEditorWidget::handleSelectionChanged(const QVector<int> &selectedInd
 {
     Q_UNUSED(selectedIndices);
     updatePropertiesPanel();
+    updateStatusNotesCount();
 }
 
 void BeatmapEditorWidget::handleUndo()
@@ -1293,7 +2046,11 @@ void BeatmapEditorWidget::handleToggleTapRecord()
             "QPushButton:hover { background: #d9536f; }"
         ));
 
-        m_saveStatusLabel->setText(QStringLiteral("ЗАПИСЬ АКТИВНА: нажимайте Z, X или Пробел"));
+        Qt::Key k1 = SettingsManager::instance().primaryKey();
+        Qt::Key k2 = SettingsManager::instance().secondaryKey();
+        QString k1Str = SettingsManager::keyToString(k1);
+        QString k2Str = SettingsManager::keyToString(k2);
+        m_saveStatusLabel->setText(QStringLiteral("ЗАПИСЬ АКТИВНА: нажимайте клавиши %1 или %2").arg(k1Str, k2Str));
         m_saveStatusLabel->setStyleSheet(QStringLiteral("font-size: 11px; color: #ff5577; font-weight: bold;"));
         m_saveStatusLabel->setVisible(true);
 
@@ -1333,6 +2090,7 @@ void BeatmapEditorWidget::handleShowHelp()
 
 void BeatmapEditorWidget::handleTitleChanged(const QString &title)
 {
+    m_isMetadataModified = true;
     m_currentBeatmap.meta.title = title.trimmed();
     if (m_currentBeatmap.meta.title.isEmpty()) {
         m_metaTitleEdit->setStyleSheet(Theme::errorLineEditStyle());
@@ -1345,6 +2103,7 @@ void BeatmapEditorWidget::handleTitleChanged(const QString &title)
 
 void BeatmapEditorWidget::handleMapperChanged(const QString &mapper)
 {
+    m_isMetadataModified = true;
     m_currentBeatmap.meta.mapper = mapper.trimmed();
     if (m_currentBeatmap.meta.mapper.isEmpty()) {
         m_metaMapperEdit->setStyleSheet(Theme::errorLineEditStyle());
@@ -1355,11 +2114,13 @@ void BeatmapEditorWidget::handleMapperChanged(const QString &mapper)
 
 void BeatmapEditorWidget::handleArtistChanged(const QString &artist)
 {
+    m_isMetadataModified = true;
     m_currentBeatmap.meta.artist = artist.trimmed();
 }
 
 void BeatmapEditorWidget::handleDifficultyChanged(int index)
 {
+    m_isMetadataModified = true;
     Q_UNUSED(index);
     m_currentBeatmap.meta.difficultyName = m_metaDiffCombo->currentText();
     QString title = m_currentBeatmap.meta.title.isEmpty() ? QStringLiteral("Новая карта") : m_currentBeatmap.meta.title;
@@ -1368,12 +2129,14 @@ void BeatmapEditorWidget::handleDifficultyChanged(int index)
 
 void BeatmapEditorWidget::handleBpmChanged(double bpm)
 {
+    m_isMetadataModified = true;
     m_currentBeatmap.meta.bpm = bpm;
     m_timelineCanvas->setBpm(bpm); // Instant dynamic grid re-render (Card 11)
 }
 
 void BeatmapEditorWidget::handleOffsetChanged(int offsetMs)
 {
+    m_isMetadataModified = true;
     m_currentBeatmap.meta.audioOffset = offsetMs;
     m_timelineCanvas->setAudioOffset(offsetMs); // Instant dynamic grid re-render (Card 11)
 }
@@ -1419,41 +2182,62 @@ void BeatmapEditorWidget::handleQuantCustomSpinChanged(int value)
 void BeatmapEditorWidget::handleChooseCover()
 {
     AudioManager::instance().playClickSound();
+    QString desktopPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
     QString filePath = QFileDialog::getOpenFileName(
         this,
         QStringLiteral("Выберите файл обложки карты"),
-        QString(),
+        desktopPath,
         QStringLiteral("Изображения (*.png *.jpg *.jpeg);;Все файлы (*.*)")
     );
     if (!filePath.isEmpty()) {
+        m_isMetadataModified = true;
         m_sourceCoverPath = filePath;
         m_currentBeatmap.meta.coverFileName = QFileInfo(filePath).fileName();
         m_currentBeatmap.coverImage.load(filePath);
         m_metaCoverLabel->setText(QFileInfo(filePath).fileName());
+        updateCoverPreview();
+        updateCachedBackground();
         m_saveStatusLabel->setText(QStringLiteral("Обложка карты выбрана!"));
         m_saveStatusLabel->setVisible(true);
         QTimer::singleShot(2500, this, [this]() { m_saveStatusLabel->setVisible(false); });
+        update();
     }
 }
 
 void BeatmapEditorWidget::handleChooseAudio()
 {
     AudioManager::instance().playClickSound();
+    QString desktopPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
     QString filePath = QFileDialog::getOpenFileName(
         this,
         QStringLiteral("Выберите аудиофайл для карты"),
-        QString(),
+        desktopPath,
         QStringLiteral("Музыкальные файлы (*.wav *.mp3 *.ogg);;Все файлы (*.*)")
     );
     if (!filePath.isEmpty()) {
+        m_isMetadataModified = true;
         m_sourceAudioPath = filePath;
         m_currentBeatmap.meta.audioFileName = QFileInfo(filePath).fileName();
-        m_metaAudioLabel->setText(QFileInfo(filePath).fileName());
+        if (m_metaAudioLabel) {
+            m_metaAudioLabel->setText(QFileInfo(filePath).fileName());
+        }
+        if (m_descAudioPathLabel) {
+            m_descAudioPathLabel->setText(QFileInfo(filePath).fileName());
+        }
+
+        // Stop current playback if active
+        if (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState) {
+            m_mediaPlayer->stop();
+        }
+
+        // Load new audio source into player and waveform decoder
         m_mediaPlayer->setSource(QUrl::fromLocalFile(filePath));
         m_waveform->load(filePath);
-        m_saveStatusLabel->setText(QStringLiteral("Аудиофайл обновлен!"));
+
+        m_saveStatusLabel->setText(QStringLiteral("Аудиофайл карты обновлен!"));
         m_saveStatusLabel->setVisible(true);
         QTimer::singleShot(2500, this, [this]() { m_saveStatusLabel->setVisible(false); });
+        update();
     }
 }
 
@@ -1531,6 +2315,13 @@ void BeatmapEditorWidget::handleSaveMap()
     );
 
     if (ok) {
+        m_initialMeta = m_currentBeatmap.meta;
+        m_initialCoverPath = m_sourceCoverPath;
+        m_initialAudioPath = m_sourceAudioPath;
+        m_initialDurationMs = m_totalDurationMs;
+        m_isDurationManuallyEdited = false;
+        m_isMetadataModified = false;
+        m_undoStack.setClean();
         m_saveStatusLabel->setText(QStringLiteral("Карта успешно сохранена!"));
         m_saveStatusLabel->setStyleSheet(QStringLiteral("font-size: 11px; color: #2ecc71; font-weight: bold;"));
         m_saveStatusLabel->setVisible(true);
@@ -1559,10 +2350,12 @@ void BeatmapEditorWidget::handleExportBkey()
     if (defaultName.isEmpty()) defaultName = QStringLiteral("map");
     defaultName += QStringLiteral(".bkey");
 
+    QString desktopPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    QString initialSavePath = QDir(desktopPath).filePath(defaultName);
     QString savePath = QFileDialog::getSaveFileName(
         this,
         QStringLiteral("Экспорт карты в файл .bkey"),
-        defaultName,
+        initialSavePath,
         QStringLiteral("BeatKey Map Package (*.bkey)")
     );
 
@@ -1592,11 +2385,20 @@ void BeatmapEditorWidget::handleExportBkey()
 
 void BeatmapEditorWidget::keyPressEvent(QKeyEvent *event)
 {
-    // Tap Record active: capture rhythm keys (Z, X, Space)
+    // Ctrl+S quick save
+    if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_S) {
+        handleSaveMap();
+        event->accept();
+        return;
+    }
+
+    // Tap Record active: capture configured rhythm keys and Space
     if (m_isTapRecording) {
-        if (event->key() == Qt::Key_Z ||
-            event->key() == Qt::Key_X ||
-            event->key() == Qt::Key_Space) {
+        Qt::Key k1 = SettingsManager::instance().primaryKey();
+        Qt::Key k2 = SettingsManager::instance().secondaryKey();
+
+        if (event->key() == k1 ||
+            event->key() == k2) {
 
             int currentAudioMs = static_cast<int>(m_mediaPlayer->position());
             int snappedMs = m_timelineCanvas->snapTime(currentAudioMs);
@@ -1642,17 +2444,50 @@ void BeatmapEditorWidget::updatePlaybackTick()
         int interpolatedMs = m_clockBaseMs + static_cast<int>(m_audioClock.elapsed() * rate);
         interpolatedMs = qBound(0, interpolatedMs, m_totalDurationMs);
         m_timelineCanvas->setCurrentTime(interpolatedMs);
-        if (!m_isScrubbing) {
-            m_scrubSlider->setValue(interpolatedMs);
-            updateTimeDisplay(interpolatedMs);
+        updateTimeDisplay(interpolatedMs);
+
+        double w = m_timelineCanvas->width();
+        double pxPerMs = m_timelineCanvas->pixelsPerSecond() / 1000.0;
+        if (w > 100 && pxPerMs > 0.0001 && !m_isScrubbing && !m_timelineCanvas->isInteracting()) {
+            double playheadX = m_timelineCanvas->timeToX(interpolatedMs);
+
+            if (m_userScrolledAway) {
+                // User navigated away. Check if they returned and are viewing the red line:
+                bool inViewingZone = (playheadX >= 0.05 * w && playheadX <= 0.85 * w);
+                if (inViewingZone) {
+                    m_playheadInViewMs += 16;
+                    if (m_playheadInViewMs >= 700) {
+                        // Watched the red line for ~0.7s: seamlessly re-magnetize!
+                        m_userScrolledAway = false;
+                        m_playheadInViewMs = 0;
+                    }
+                } else if (playheadX > 0.85 * w && playheadX < w + 80 && m_playheadInViewMs > 100) {
+                    // Reached the right threshold while in view: page forward and re-magnetize
+                    m_userScrolledAway = false;
+                    m_playheadInViewMs = 0;
+                    int newScroll = qMax(0, interpolatedMs - static_cast<int>((0.15 * w) / pxPerMs));
+                    m_isAutoScrolling = true;
+                    m_timelineCanvas->setScrollTime(newScroll);
+                    m_isAutoScrolling = false;
+                } else {
+                    m_playheadInViewMs = 0;
+                }
+            } else {
+                // Active auto-following mode (Page Scroll):
+                // Red line moves across screen. When it reaches ~85% of screen width (or is off-screen),
+                // page screen forward so that red line is comfortably placed at 15% from left.
+                if (playheadX > 0.85 * w || playheadX < 0) {
+                    int newScroll = qMax(0, interpolatedMs - static_cast<int>((0.15 * w) / pxPerMs));
+                    m_isAutoScrolling = true;
+                    m_timelineCanvas->setScrollTime(newScroll);
+                    m_isAutoScrolling = false;
+                }
+            }
         }
     } else {
         int currentMs = static_cast<int>(m_mediaPlayer->position());
         m_timelineCanvas->setCurrentTime(currentMs);
-        if (!m_isScrubbing) {
-            m_scrubSlider->setValue(currentMs);
-            updateTimeDisplay(currentMs);
-        }
+        updateTimeDisplay(currentMs);
     }
 }
 
@@ -1673,7 +2508,7 @@ void BeatmapEditorWidget::updatePropertiesPanel()
         int idx = *sel.begin();
         if (idx >= 0 && idx < m_currentBeatmap.notes.size()) {
             int t = m_currentBeatmap.notes[idx].timeMs;
-            m_selTimeLabel->setText(QStringLiteral("%1 (%2 мс)").arg(formatMsToTime(t)).arg(t));
+            m_selTimeLabel->setText(formatMsToTime(t));
         } else {
             m_selTimeLabel->setText(QStringLiteral("—"));
         }
@@ -1686,6 +2521,7 @@ void BeatmapEditorWidget::updatePropertiesPanel()
 
 void BeatmapEditorWidget::updateStats()
 {
+    updateStatusNotesCount();
     int count = m_currentBeatmap.notes.size();
     m_statTotalNotes->setText(QString::number(count));
 

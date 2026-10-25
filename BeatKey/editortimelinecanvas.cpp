@@ -85,15 +85,6 @@ void EditorTimelineCanvas::setTotalDuration(int durationMs)
 void EditorTimelineCanvas::setCurrentTime(int timeMs)
 {
     m_currentTimeMs = qBound(0, timeMs, m_totalDurationMs);
-
-    // Auto-scroll to keep playhead in view during playback
-    double px = timeToX(m_currentTimeMs);
-    if (px > width() - 80) {
-        setScrollTime(qMax(0, m_currentTimeMs - 120));
-    } else if (px < 0) {
-        setScrollTime(qMax(0, m_currentTimeMs - 60));
-    }
-
     update();
 }
 
@@ -105,6 +96,7 @@ void EditorTimelineCanvas::setScrollTime(int timeMs)
     if (newScroll != m_scrollTimeMs) {
         m_scrollTimeMs = newScroll;
         emit scrollChanged(m_scrollTimeMs, m_totalDurationMs, visibleMs);
+        updateHoverInfo();
         update();
     }
 }
@@ -123,7 +115,19 @@ void EditorTimelineCanvas::setActiveTool(EditorTool tool)
 
 void EditorTimelineCanvas::setWaveform(const AudioWaveform *waveform)
 {
+    if (m_waveform == waveform) {
+        update();
+        return;
+    }
+    if (m_waveform) {
+        disconnect(m_waveform, &AudioWaveform::waveformReady, this, nullptr);
+    }
     m_waveform = waveform;
+    if (m_waveform) {
+        connect(m_waveform, &AudioWaveform::waveformReady, this, [this]() {
+            update();
+        });
+    }
     update();
 }
 
@@ -254,6 +258,16 @@ int EditorTimelineCanvas::findNoteNear(double x, double y, double tolerancePx) c
     }
 
     return closestIndex;
+}
+
+void EditorTimelineCanvas::updateHoverInfo()
+{
+    if (!m_mouseInside) return;
+    int hoverMs = qBound(0, xToTime(m_mousePos.x()), m_totalDurationMs);
+    double mDur = measureDurationMs();
+    int mIdx = qFloor((hoverMs - m_audioOffsetMs) / mDur) + 1;
+    double beatInMeasure = ((hoverMs - m_audioOffsetMs - (mIdx - 1) * mDur) / (mDur / 4.0)) + 1.0;
+    emit hoverInfoChanged(hoverMs, mIdx, beatInMeasure);
 }
 
 void EditorTimelineCanvas::drawDiamond(QPainter &painter, double cx, double cy, double radius, bool isSelected, bool isHover)
@@ -502,15 +516,15 @@ void EditorTimelineCanvas::paintEvent(QPaintEvent *event)
     const double trackY = rulerH;
     const double trackCenterY = trackY + trackH / 2.0;
 
-    // 1. Overall canvas background
-    painter.fillRect(rect(), QColor(24, 16, 40));
+    // 1. Overall canvas background with translucency to reveal editor background art
+    painter.fillRect(rect(), QColor(20, 13, 34, 160));
 
     // 2. Track area background
     QRectF trackRect(0, trackY, w, trackH);
-    painter.fillRect(trackRect, QColor(20, 13, 34));
+    painter.fillRect(trackRect, QColor(16, 10, 28, 140));
 
     // Center guide line
-    painter.setPen(QPen(QColor(70, 44, 110), 1, Qt::DashLine));
+    painter.setPen(QPen(QColor(125, 68, 207, 120), 1, Qt::DashLine));
     painter.drawLine(0, static_cast<int>(trackCenterY), w, static_cast<int>(trackCenterY));
 
     // Visible time bounds
@@ -525,7 +539,7 @@ void EditorTimelineCanvas::paintEvent(QPaintEvent *event)
 
     // 5. Ruler top header bar
     painter.setPen(Qt::NoPen);
-    painter.fillRect(QRectF(0, 0, w, rulerH), QColor(32, 20, 54, 240));
+    painter.fillRect(QRectF(0, 0, w, rulerH), QColor(28, 17, 48, 200));
     painter.setPen(QPen(QColor(125, 68, 207), 1));
     painter.drawLine(0, static_cast<int>(rulerH), w, static_cast<int>(rulerH));
 
@@ -742,7 +756,30 @@ void EditorTimelineCanvas::mousePressEvent(QMouseEvent *event)
 void EditorTimelineCanvas::mouseMoveEvent(QMouseEvent *event)
 {
     m_mousePos = event->position();
-    m_mouseInside = true;
+
+    if (!rect().contains(event->pos())) {
+        m_mouseInside = false;
+        if (m_isBrushingPlace) {
+            m_isBrushingPlace = false;
+            if (!m_brushSessionAddedNotes.isEmpty()) {
+                emit notesBatchAddRequested(m_brushSessionAddedNotes);
+                m_brushSessionAddedNotes.clear();
+            }
+        }
+        if (m_isBrushingErase) {
+            m_isBrushingErase = false;
+            if (!m_brushSessionErasedNotes.isEmpty()) {
+                emit notesBatchDeleteRequested(m_brushSessionErasedNotes);
+                m_brushSessionErasedNotes.clear();
+            }
+        }
+        update();
+        if (!m_isPanning) {
+            return;
+        }
+    } else {
+        m_mouseInside = true;
+    }
 
     // MMB Panning
     if (m_isPanning) {
@@ -754,11 +791,7 @@ void EditorTimelineCanvas::mouseMoveEvent(QMouseEvent *event)
     }
 
     // Hover info computation
-    int hoverMs = qBound(0, xToTime(m_mousePos.x()), m_totalDurationMs);
-    double mDur = measureDurationMs();
-    int mIdx = qFloor((hoverMs - m_audioOffsetMs) / mDur) + 1;
-    double beatInMeasure = ((hoverMs - m_audioOffsetMs - (mIdx - 1) * mDur) / (mDur / 4.0)) + 1.0;
-    emit hoverInfoChanged(hoverMs, mIdx, beatInMeasure);
+    updateHoverInfo();
 
     // Scrubbing ruler
     if (m_isScrubbingRuler) {
@@ -982,6 +1015,7 @@ void EditorTimelineCanvas::leaveEvent(QEvent *event)
         m_isPanning = false;
         unsetCursor();
     }
+    m_mouseInside = false;
     update();
     QWidget::leaveEvent(event);
 }
@@ -989,6 +1023,8 @@ void EditorTimelineCanvas::leaveEvent(QEvent *event)
 void EditorTimelineCanvas::wheelEvent(QWheelEvent *event)
 {
     int delta = event->angleDelta().y();
+    if (delta == 0) delta = event->angleDelta().x();
+    if (delta == 0) return;
 
     if (event->modifiers() & Qt::ControlModifier) {
         // Zooming in/out centered around mouse cursor position (Card 12)
@@ -1003,14 +1039,27 @@ void EditorTimelineCanvas::wheelEvent(QWheelEvent *event)
             m_scrollTimeMs = qMax(0, timeUnderMouse - static_cast<int>(mouseX / (m_pixelsPerSecond / 1000.0)));
             updateScrollBounds();
             emit zoomChanged(m_pixelsPerSecond);
+            updateHoverInfo();
             update();
         }
         event->accept();
         return;
     }
 
-    // Horizontal timeline scrolling (Card 13)
-    int timeShift = static_cast<int>(-delta * 1.6);
+    // Horizontal timeline scrolling scaled dynamically with zoom:
+    // Moves a consistent screen pixel distance per wheel tick,
+    // so zooming out allows rapidly traversing the track.
+    // Shift modifier provides 2x speed boost for rapid navigation.
+    double pxPerMs = m_pixelsPerSecond / 1000.0;
+    if (pxPerMs < 0.001) pxPerMs = 0.001;
+
+    double pixelsToScroll = -delta * 0.55;
+    if (event->modifiers() & Qt::ShiftModifier) {
+        pixelsToScroll *= 2.0;
+    }
+
+    int timeShift = static_cast<int>(std::round(pixelsToScroll / pxPerMs));
     setScrollTime(m_scrollTimeMs + timeShift);
+    updateHoverInfo();
     event->accept();
 }

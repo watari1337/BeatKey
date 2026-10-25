@@ -24,7 +24,8 @@ SOURCES += \
     editorcommands.cpp \
     editorhelpdialog.cpp \
     editortimelinecanvas.cpp \
-    beatmapeditorwidget.cpp
+    beatmapeditorwidget.cpp \
+    savepromptdialog.cpp
 
 HEADERS += \
     mainwindow.h \
@@ -46,7 +47,8 @@ HEADERS += \
     editorcommands.h \
     editorhelpdialog.h \
     editortimelinecanvas.h \
-    beatmapeditorwidget.h
+    beatmapeditorwidget.h \
+    savepromptdialog.h
 
 RESOURCES += \
     resources.qrc

@@ -62,6 +62,9 @@ BeatmapMeta BeatmapMeta::fromJson(const QJsonObject &obj)
     meta.mapper = obj.value(QStringLiteral("mapper")).toString().trimmed();
     meta.difficultyName = obj.value(QStringLiteral("difficultyName")).toString().trimmed();
     meta.bpm = obj.value(QStringLiteral("bpm")).toDouble(120.0);
+    if (meta.bpm <= 0.0) {
+        meta.bpm = 120.0;
+    }
     meta.audioOffset = obj.value(QStringLiteral("audioOffset")).toInt(0);
     meta.audioFileName = obj.value(QStringLiteral("audioFileName")).toString().trimmed();
     meta.coverFileName = obj.value(QStringLiteral("coverFileName")).toString().trimmed();

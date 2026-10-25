@@ -24,8 +24,9 @@ AudioWaveform::~AudioWaveform()
 void AudioWaveform::clear()
 {
     if (m_decoder) {
+        m_decoder->disconnect();
         m_decoder->stop();
-        m_decoder->deleteLater();
+        delete m_decoder;
         m_decoder = nullptr;
     }
     m_peaks.clear();

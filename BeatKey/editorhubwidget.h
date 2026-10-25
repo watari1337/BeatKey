@@ -37,6 +37,7 @@ protected:
 
 private slots:
     void handleCreateNewMap();
+    void handleImportFolder();
     void handleMapSelected(int row);
 
 private:
@@ -48,6 +49,7 @@ private:
 
     // Header controls
     QPushButton *m_backBtn;
+    QPushButton *m_importFolderBtn;
     QPushButton *m_createMapBtn;
 
     // Content container & Empty State

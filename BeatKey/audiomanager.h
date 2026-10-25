@@ -76,6 +76,8 @@ public:
     void playClickSound();
     void playHoverSound();
 
+    void cleanup();
+
 public slots:
     void updateVolumes();
 
@@ -85,7 +87,7 @@ signals:
 
 private:
     explicit AudioManager(QObject *parent = nullptr);
-    ~AudioManager() override = default;
+    ~AudioManager() override;
     AudioManager(const AudioManager&) = delete;
     AudioManager& operator=(const AudioManager&) = delete;
 

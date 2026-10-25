@@ -4,6 +4,7 @@
 #include <QtCore/private/qzipwriter_p.h>
 
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QCryptographicHash>
@@ -96,6 +97,53 @@ QVector<Beatmap> BeatmapManager::loadAllFromDirectory(const QString &dirPath, QS
     qDebug() << "[BeatmapManager] Успешно загружено" << result.size() << "карт из" << dirPath;
     return result;
 }
+
+int BeatmapManager::importAllFromDirectory(const QString &sourceDirPath,
+                                           const QString &targetDirPath,
+                                           QStringList *errors)
+{
+    QDir srcDir(sourceDirPath);
+    if (!srcDir.exists()) {
+        QString err = QStringLiteral("Директория '%1' не найдена.").arg(sourceDirPath);
+        qWarning() << "[BeatmapManager]" << err;
+        if (errors) errors->append(err);
+        return 0;
+    }
+
+    QDir targetDir(targetDirPath);
+    if (!targetDir.exists()) {
+        targetDir.mkpath(QStringLiteral("."));
+    }
+
+    int count = 0;
+    QDirIterator it(sourceDirPath, QStringList() << QStringLiteral("*.bkey"), QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        QString srcPath = it.next();
+        QFileInfo srcInfo(srcPath);
+        QString destPath = targetDir.filePath(srcInfo.fileName());
+
+        if (QFileInfo(srcPath).canonicalFilePath() == QFileInfo(destPath).canonicalFilePath()) {
+            count++;
+            continue;
+        }
+
+        if (QFile::exists(destPath)) {
+            QFile::remove(destPath);
+        }
+
+        if (QFile::copy(srcPath, destPath)) {
+            count++;
+        } else {
+            QString err = QStringLiteral("Не удалось скопировать карту '%1' в '%2'.").arg(srcPath, destPath);
+            qWarning() << "[BeatmapManager]" << err;
+            if (errors) errors->append(err);
+        }
+    }
+
+    qDebug() << "[BeatmapManager] Импортировано карт:" << count << "из" << sourceDirPath;
+    return count;
+}
+
 
 // ============================================================================
 // Single File Loading & Validation (TZ 4.10.4)

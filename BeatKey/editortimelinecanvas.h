@@ -61,6 +61,9 @@ public:
     int totalDuration() const { return m_totalDurationMs; }
     double pixelsPerSecond() const { return m_pixelsPerSecond; }
     EditorTool activeTool() const { return m_activeTool; }
+    bool isInteracting() const {
+        return m_isPanning || m_isDraggingNotes || m_isBrushingPlace || m_isBrushingErase || m_isScrubbingRuler;
+    }
     int snapTime(int timeMs) const;
     double quantIntervalMs() const;
     double measureDurationMs() const;
@@ -100,6 +103,7 @@ private:
     void drawWaveform(QPainter &painter, int startMs, int endMs, double trackY, double trackH);
     void drawGrid(QPainter &painter, int startMs, int endMs, int w, int h, double rulerH, double trackY);
     void drawPlayhead(QPainter &painter, int w, int h, double rulerH);
+    void updateHoverInfo();
     void updateScrollBounds();
 
     // Data

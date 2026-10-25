@@ -94,12 +94,16 @@ void MainWindow::setupUi()
         switchToScreen(Screen_Editor);
     });
     connect(m_editorHubWidget, &EditorHubWidget::editMapRequested, this, [this](const Beatmap &map) {
+        qDebug() << "[MainWindow] editMapRequested for:" << map.meta.title << "audioPath:" << map.extractedAudioPath;
         m_editorWidget->loadBeatmap(map, map.extractedAudioPath, QString());
+        qDebug() << "[MainWindow] loadBeatmap completed, switching screen";
         switchToScreen(Screen_Editor);
+        qDebug() << "[MainWindow] switchToScreen completed";
     });
 
     // Editor canvas navigation
     connect(m_editorWidget, &BeatmapEditorWidget::backRequested, this, [this]() {
+        m_editorWidget->stopPlayback();
         switchToScreen(Screen_EditorHub);
         m_editorHubWidget->refreshMapList();
     });
@@ -190,6 +194,10 @@ void MainWindow::closeEvent(QCloseEvent *event)
     ExitDialog dialog(this);
     if (dialog.exec() == QDialog::Accepted) {
         SettingsManager::instance().saveSettings();
+        if (m_editorWidget) {
+            m_editorWidget->stopPlayback();
+        }
+        AudioManager::instance().cleanup();
         event->accept();
     } else {
         event->ignore();
@@ -200,9 +208,7 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
         if (m_stackedWidget->currentIndex() == Screen_Editor) {
-            m_editorWidget->stopPlayback();
-            switchToScreen(Screen_EditorHub);
-            m_editorHubWidget->refreshMapList();
+            m_editorWidget->maybeSaveAndExit();
             event->accept();
             return;
         }

@@ -40,6 +40,18 @@ public:
      */
     Beatmap loadFromFile(const QString &bkeyFilePath, QString *error = nullptr);
 
+    /**
+     * @brief Imports all .bkey packages found in sourceDirPath (including subdirectories)
+     * into targetDirPath.
+     * @param sourceDirPath Folder selected by user.
+     * @param targetDirPath Target directory (e.g. songs/ folder).
+     * @param errors Optional list to accumulate human-readable error messages.
+     * @return Number of imported/copied maps.
+     */
+    int importAllFromDirectory(const QString &sourceDirPath,
+                               const QString &targetDirPath,
+                               QStringList *errors = nullptr);
+
     // ========================================================================
     // Package Export (for Beatmap Editor)
     // ========================================================================
