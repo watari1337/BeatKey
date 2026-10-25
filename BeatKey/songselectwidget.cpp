@@ -1,3 +1,4 @@
+#include <QStandardPaths>
 #include "songselectwidget.h"
 #include "beatmapmanager.h"
 #include "audiomanager.h"
@@ -27,7 +28,7 @@ QString SongSelectWidget::songsDirectory()
 SongSelectWidget::SongSelectWidget(QWidget *parent)
     : QWidget(parent)
     , m_backBtn(nullptr)
-    , m_addMapBtn(nullptr)
+    , m_importFolderBtn(nullptr)
     , m_contentContainer(nullptr)
     , m_emptyStateWidget(nullptr)
     , m_songListWidget(nullptr)
@@ -88,16 +89,16 @@ void SongSelectWidget::setupUi()
         "color: #b0a6cc;"
     ));
 
-    m_addMapBtn = new QPushButton(QStringLiteral("Добавить карту"), this);
-    m_addMapBtn->setCursor(Qt::PointingHandCursor);
-    m_addMapBtn->setStyleSheet(Theme::primaryButtonStyle());
-    connect(m_addMapBtn, &QPushButton::clicked, this, &SongSelectWidget::handleAddMap);
+    m_importFolderBtn = new QPushButton(QStringLiteral("Загрузить папку"), this);
+    m_importFolderBtn->setCursor(Qt::PointingHandCursor);
+    m_importFolderBtn->setStyleSheet(Theme::primaryButtonStyle());
+    connect(m_importFolderBtn, &QPushButton::clicked, this, &SongSelectWidget::handleImportFolder);
 
     headerLayout->addWidget(m_backBtn);
     headerLayout->addSpacing(25);
     headerLayout->addWidget(titleLabel);
     headerLayout->addStretch(1);
-    headerLayout->addWidget(m_addMapBtn);
+    headerLayout->addWidget(m_importFolderBtn);
 
     mainLayout->addLayout(headerLayout);
 
@@ -298,7 +299,7 @@ void SongSelectWidget::setupUi()
 
     auto *emptyDesc = new QLabel(
         QStringLiteral("В папке с игрой пока нет карт.\n"
-                       "Нажмите кнопку «Добавить карту» в правом верхнем углу, чтобы загрузить файлы .bkey."),
+                       "Нажмите кнопку «Загрузить папку» в правом верхнем углу, чтобы загрузить файлы карт .bkey."),
         m_emptyStateWidget
     );
     emptyDesc->setAlignment(Qt::AlignCenter);
@@ -320,17 +321,24 @@ void SongSelectWidget::refreshSongList()
     QStringList errors;
     m_loadedBeatmaps = BeatmapManager::instance().loadAllFromDirectory(targetDir, &errors);
 
-    m_songListWidget->clear();
-    for (const auto &map : m_loadedBeatmaps) {
-        QString itemText = QStringLiteral("%1 — %2\n[%3 • %4]")
-            .arg(map.meta.artist, map.meta.title, map.meta.difficultyName, map.formattedBpm());
-        m_songListWidget->addItem(itemText);
+    {
+        const QSignalBlocker blocker(m_songListWidget);
+        m_songListWidget->clear();
+        for (const auto &map : m_loadedBeatmaps) {
+            QString itemText = QStringLiteral("%1 — %2\n[%3 • %4]")
+                .arg(map.meta.artist, map.meta.title, map.meta.difficultyName, map.formattedBpm());
+            m_songListWidget->addItem(itemText);
+        }
+
+        if (!m_loadedBeatmaps.isEmpty()) {
+            m_songListWidget->setCurrentRow(0);
+        }
     }
 
     updateEmptyStateVisibility();
 
     if (!m_loadedBeatmaps.isEmpty()) {
-        m_songListWidget->setCurrentRow(0);
+        updateDetailsCard(m_loadedBeatmaps[0]);
     }
 }
 
@@ -341,55 +349,26 @@ void SongSelectWidget::updateEmptyStateVisibility()
     m_emptyStateWidget->setVisible(!hasMaps);
 }
 
-void SongSelectWidget::handleAddMap()
+void SongSelectWidget::handleImportFolder()
 {
     AudioManager::instance().playClickSound();
 
-    QStringList selectedFiles = QFileDialog::getOpenFileNames(
+    QString desktopPath = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    QString chosenDir = QFileDialog::getExistingDirectory(
         this,
-        QStringLiteral("Выберите файлы карт BeatKey"),
-        QString(),
-        QStringLiteral("Карты BeatKey (*.bkey);;Все файлы (*.*)")
+        QStringLiteral("Выберите папку с картами BeatKey"),
+        desktopPath,
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks
     );
 
-    if (selectedFiles.isEmpty()) {
+    if (chosenDir.isEmpty()) {
         return;
     }
 
     QString targetDir = songsDirectory();
-    QString lastCopiedFileName;
-
-    for (const QString &srcPath : selectedFiles) {
-        QFileInfo srcInfo(srcPath);
-        QString destPath = QDir(targetDir).filePath(srcInfo.fileName());
-
-        // Если исходный файл и целевой файл совпадают (пользователь выбрал файл уже из папки songs)
-        if (QFileInfo(srcPath).canonicalFilePath() == QFileInfo(destPath).canonicalFilePath()) {
-            lastCopiedFileName = srcInfo.fileName();
-            continue;
-        }
-
-        // Если файл с таким именем уже существует, перезаписываем его
-        if (QFile::exists(destPath)) {
-            QFile::remove(destPath);
-        }
-
-        if (QFile::copy(srcPath, destPath)) {
-            lastCopiedFileName = srcInfo.fileName();
-        }
-    }
+    BeatmapManager::instance().importAllFromDirectory(chosenDir, targetDir);
 
     refreshSongList();
-
-    // Автоматически фокусируемся на добавленной карте в списке
-    if (!lastCopiedFileName.isEmpty()) {
-        for (int i = 0; i < m_loadedBeatmaps.size(); ++i) {
-            if (QFileInfo(m_loadedBeatmaps[i].bkeyFilePath).fileName() == lastCopiedFileName) {
-                m_songListWidget->setCurrentRow(i);
-                break;
-            }
-        }
-    }
 }
 
 void SongSelectWidget::handleSongSelected(int row)
@@ -420,8 +399,13 @@ void SongSelectWidget::updateDetailsCard(const Beatmap &map)
     m_notesCountLabel->setText(QString::number(map.totalNotes()));
     m_durationLabel->setText(map.formattedDuration());
 
-    if (!map.coverImage.isNull()) {
-        m_coverArtLabel->setPixmap(map.coverImage.scaled(m_coverArtLabel->size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
+    QPixmap cover = map.coverImage;
+    if (cover.isNull()) {
+        static QPixmap defaultBg(QStringLiteral(":/assets/images/standard_bg2.jpg"));
+        cover = defaultBg;
+    }
+    if (!cover.isNull()) {
+        m_coverArtLabel->setPixmap(cover.scaled(m_coverArtLabel->size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));
     } else {
         m_coverArtLabel->clear();
         m_coverArtLabel->setText(QStringLiteral("Нет обложки"));

@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QUrl>
+#include <QElapsedTimer>
 
 class QMediaPlayer;
 class QAudioOutput;
@@ -75,6 +76,8 @@ public:
     void playClickSound();
     void playHoverSound();
 
+    void cleanup();
+
 public slots:
     void updateVolumes();
 
@@ -84,7 +87,7 @@ signals:
 
 private:
     explicit AudioManager(QObject *parent = nullptr);
-    ~AudioManager() override = default;
+    ~AudioManager() override;
     AudioManager(const AudioManager&) = delete;
     AudioManager& operator=(const AudioManager&) = delete;
 
@@ -107,6 +110,7 @@ private:
     QSoundEffect *m_sfxClear;
     QSoundEffect *m_sfxClick;
     QSoundEffect *m_sfxHover;
+    QElapsedTimer m_clickDebounceTimer;
 };
 
 #endif // AUDIOMANAGER_H

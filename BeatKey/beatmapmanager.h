@@ -40,17 +40,36 @@ public:
      */
     Beatmap loadFromFile(const QString &bkeyFilePath, QString *error = nullptr);
 
+    /**
+     * @brief Imports all .bkey packages found in sourceDirPath (including subdirectories)
+     * into targetDirPath.
+     * @param sourceDirPath Folder selected by user.
+     * @param targetDirPath Target directory (e.g. songs/ folder).
+     * @param errors Optional list to accumulate human-readable error messages.
+     * @return Number of imported/copied maps.
+     */
+    int importAllFromDirectory(const QString &sourceDirPath,
+                               const QString &targetDirPath,
+                               QStringList *errors = nullptr);
+
     // ========================================================================
     // Package Export (for Beatmap Editor)
     // ========================================================================
     /**
-     * @brief Packages map.json, mp3 audio, and cover image into a .bkey container.
+     * @brief Packages map.json, audio, and cover image into a .bkey container.
      */
     bool exportToFile(const QString &outBkeyPath,
                       Beatmap &beatmap,
-                      const QString &audioSourceMp3Path,
+                      const QString &audioSourcePath,
                       const QString &coverImagePath,
                       QString *error = nullptr);
+
+    /**
+     * @brief Generates a collision-free unique .bkey file path in the songs/ directory.
+     * @param title Title of the map to base the sanitized file name on.
+     * @return Full path to an available <title>_<salt>.bkey file.
+     */
+    QString generateUniqueBkeyPath(const QString &title) const;
 
     // ========================================================================
     // Map Hash Calculation (TZ 4.10.3)

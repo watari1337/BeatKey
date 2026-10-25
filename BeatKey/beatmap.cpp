@@ -3,6 +3,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QFileInfo>
 #include <algorithm>
 
 // ============================================================================
@@ -61,6 +62,9 @@ BeatmapMeta BeatmapMeta::fromJson(const QJsonObject &obj)
     meta.mapper = obj.value(QStringLiteral("mapper")).toString().trimmed();
     meta.difficultyName = obj.value(QStringLiteral("difficultyName")).toString().trimmed();
     meta.bpm = obj.value(QStringLiteral("bpm")).toDouble(120.0);
+    if (meta.bpm <= 0.0) {
+        meta.bpm = 120.0;
+    }
     meta.audioOffset = obj.value(QStringLiteral("audioOffset")).toInt(0);
     meta.audioFileName = obj.value(QStringLiteral("audioFileName")).toString().trimmed();
     meta.coverFileName = obj.value(QStringLiteral("coverFileName")).toString().trimmed();
@@ -159,12 +163,14 @@ Beatmap Beatmap::fromJson(const QByteArray &jsonData, QString *error)
     }
     map.meta = BeatmapMeta::fromJson(root[QStringLiteral("meta")].toObject());
 
-    // Валидация аудио: строго MP3
-    if (!map.meta.audioFileName.endsWith(QStringLiteral(".mp3"), Qt::CaseInsensitive)) {
-        QString err = QStringLiteral("Неподдерживаемый аудиоформат '%1'. Поддерживается только .mp3.")
+    // Валидация аудио: поддерживаются .mp3, .wav, .ogg
+    QString audioExt = QFileInfo(map.meta.audioFileName).suffix().toLower();
+    if (audioExt != QStringLiteral("mp3") && audioExt != QStringLiteral("wav") && audioExt != QStringLiteral("ogg")) {
+        QString err = QStringLiteral("Неподдерживаемый аудиоформат '%1'. Поддерживаются .mp3, .wav, .ogg.")
                           .arg(map.meta.audioFileName);
         if (error) *error = err;
         map.errorMessage = err;
+        map.isValid = false;
         return map;
     }
 

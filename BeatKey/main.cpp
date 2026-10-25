@@ -1,3 +1,4 @@
+#include "audiomanager.h"
 #include "mainwindow.h"
 #include "theme.h"
 #include "settingsmanager.h"
@@ -18,5 +19,7 @@ int main(int argc, char *argv[])
         w.showNormal();
     }
 
-    return a.exec();
+    int result = a.exec();
+    AudioManager::instance().cleanup();
+    return result;
 }

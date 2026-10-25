@@ -17,7 +17,15 @@ SOURCES += \
     audiomanager.cpp \
     beatmap.cpp \
     beatmapmanager.cpp \
-    songselectwidget.cpp
+    songselectwidget.cpp \
+    newbeatmapdialog.cpp \
+    editorhubwidget.cpp \
+    audiowaveform.cpp \
+    editorcommands.cpp \
+    editorhelpdialog.cpp \
+    editortimelinecanvas.cpp \
+    beatmapeditorwidget.cpp \
+    savepromptdialog.cpp
 
 HEADERS += \
     mainwindow.h \
@@ -32,7 +40,15 @@ HEADERS += \
     audiomanager.h \
     beatmap.h \
     beatmapmanager.h \
-    songselectwidget.h
+    songselectwidget.h \
+    newbeatmapdialog.h \
+    editorhubwidget.h \
+    audiowaveform.h \
+    editorcommands.h \
+    editorhelpdialog.h \
+    editortimelinecanvas.h \
+    beatmapeditorwidget.h \
+    savepromptdialog.h
 
 RESOURCES += \
     resources.qrc
