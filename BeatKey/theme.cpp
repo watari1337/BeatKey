@@ -3,12 +3,31 @@
 #include <QApplication>
 #include <QStyleFactory>
 #include <QLinearGradient>
+#include <QProxyStyle>
+#include <QStyleOptionSlider>
+#include <algorithm>
+#include <cmath>
+
 
 namespace Theme {
 
+class BeatKeyProxyStyle : public QProxyStyle {
+public:
+    using QProxyStyle::QProxyStyle;
+    int styleHint(StyleHint hint, const QStyleOption *option = nullptr,
+                  const QWidget *widget = nullptr, QStyleHintReturn *returnData = nullptr) const override
+    {
+        if (hint == QStyle::SH_Slider_AbsoluteSetButtons) {
+            return Qt::LeftButton | Qt::MiddleButton;
+        }
+        return QProxyStyle::styleHint(hint, option, widget, returnData);
+    }
+};
+
 void applyApplicationStyle(QApplication &app)
 {
-    app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    QStyle *baseStyle = QStyleFactory::create(QStringLiteral("Fusion"));
+    app.setStyle(new BeatKeyProxyStyle(baseStyle));
     app.setPalette(createDarkPalette());
 }
 
@@ -302,22 +321,32 @@ QString comboBoxStyle()
 QString sliderStyle()
 {
     return QStringLiteral(
+        "QSlider:horizontal {"
+        "  min-height: 26px;"
+        "}"
         "QSlider::groove:horizontal {"
-        "  height: 8px;"
+        "  height: 6px;"
         "  background: #251b3d;"
-        "  border-radius: 4px;"
+        "  border-radius: 3px;"
+        "  margin-left: 2px;"
+        "  margin-right: 2px;"
         "}"
         "QSlider::sub-page:horizontal {"
         "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7d44cf, stop:1 #a259ff);"
-        "  border-radius: 4px;"
+        "  border-radius: 3px;"
+        "  margin-left: 2px;"
         "}"
         "QSlider::handle:horizontal {"
         "  background: #ffffff;"
         "  border: 2px solid #a259ff;"
-        "  width: 18px;"
-        "  margin-top: -5px;"
-        "  margin-bottom: -5px;"
-        "  border-radius: 9px;"
+        "  width: 14px;"
+        "  margin-top: -4px;"
+        "  margin-bottom: -4px;"
+        "  border-radius: 7px;"
+        "}"
+        "QSlider::handle:horizontal:hover {"
+        "  background: #f5eeff;"
+        "  border: 2px solid #bb9af7;"
         "}"
     );
 }
@@ -440,3 +469,67 @@ QString toolButtonStyle()
 }
 
 } // namespace Theme
+
+// ============================================================================
+// ClickableSlider Implementation
+// ============================================================================
+
+ClickableSlider::ClickableSlider(Qt::Orientation orientation, QWidget *parent)
+    : QSlider(orientation, parent)
+{
+    setMinimumHeight(26);
+    setCursor(Qt::PointingHandCursor);
+    setStyleSheet(Theme::sliderStyle());
+}
+
+ClickableSlider::ClickableSlider(QWidget *parent)
+    : QSlider(parent)
+{
+    setMinimumHeight(26);
+    setCursor(Qt::PointingHandCursor);
+    setStyleSheet(Theme::sliderStyle());
+}
+
+void ClickableSlider::mousePressEvent(QMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton) {
+        QStyleOptionSlider opt;
+        initStyleOption(&opt);
+        QRect handleRect = style()->subControlRect(QStyle::CC_Slider, &opt, QStyle::SC_SliderHandle, this);
+
+        if (!handleRect.contains(event->position().toPoint())) {
+            int minVal = minimum();
+            int maxVal = maximum();
+            int newVal = minVal;
+
+            if (orientation() == Qt::Horizontal) {
+                int halfHandle = handleRect.width() > 0 ? (handleRect.width() / 2) : 7;
+                int trackWidth = width() - (halfHandle * 2);
+                if (trackWidth > 0) {
+                    int clickX = std::clamp(static_cast<int>(event->position().x()) - halfHandle, 0, trackWidth);
+                    double ratio = static_cast<double>(clickX) / trackWidth;
+                    if (invertedAppearance()) {
+                        ratio = 1.0 - ratio;
+                    }
+                    newVal = minVal + static_cast<int>(std::round(ratio * (maxVal - minVal)));
+                }
+            } else {
+                int halfHandle = handleRect.height() > 0 ? (handleRect.height() / 2) : 7;
+                int trackHeight = height() - (halfHandle * 2);
+                if (trackHeight > 0) {
+                    int clickY = std::clamp(static_cast<int>(event->position().y()) - halfHandle, 0, trackHeight);
+                    double ratio = static_cast<double>(clickY) / trackHeight;
+                    if (!invertedAppearance()) {
+                        ratio = 1.0 - ratio;
+                    }
+                    newVal = minVal + static_cast<int>(std::round(ratio * (maxVal - minVal)));
+                }
+            }
+
+            setValue(newVal);
+            setSliderPosition(newVal);
+            emit sliderMoved(newVal);
+        }
+    }
+    QSlider::mousePressEvent(event);
+}

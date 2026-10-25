@@ -206,6 +206,11 @@ void AudioManager::playClearSound()
 
 void AudioManager::playClickSound()
 {
+    if (m_clickDebounceTimer.isValid() && m_clickDebounceTimer.elapsed() < 70) {
+        return;
+    }
+    m_clickDebounceTimer.start();
+
     if (m_sfxClick) m_sfxClick->play();
 }
 

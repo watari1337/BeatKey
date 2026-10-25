@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QUrl>
+#include <QElapsedTimer>
 
 class QMediaPlayer;
 class QAudioOutput;
@@ -107,6 +108,7 @@ private:
     QSoundEffect *m_sfxClear;
     QSoundEffect *m_sfxClick;
     QSoundEffect *m_sfxHover;
+    QElapsedTimer m_clickDebounceTimer;
 };
 
 #endif // AUDIOMANAGER_H

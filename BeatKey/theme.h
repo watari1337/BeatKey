@@ -6,6 +6,9 @@
 #include <QPalette>
 #include <QPainter>
 #include <QRect>
+#include <QSlider>
+#include <QMouseEvent>
+
 
 class QApplication;
 
@@ -83,5 +86,19 @@ namespace Theme {
     QString errorButtonStyle();
     QString toolButtonStyle();
 }
+
+/**
+ * @brief ClickableSlider is a QSlider that jumps directly to the mouse click position
+ * and supports smooth continuous dragging without stepping.
+ */
+class ClickableSlider : public QSlider
+{
+public:
+    explicit ClickableSlider(Qt::Orientation orientation, QWidget *parent = nullptr);
+    explicit ClickableSlider(QWidget *parent = nullptr);
+
+protected:
+    void mousePressEvent(QMouseEvent *event) override;
+};
 
 #endif // THEME_H

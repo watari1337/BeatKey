@@ -321,17 +321,24 @@ void SongSelectWidget::refreshSongList()
     QStringList errors;
     m_loadedBeatmaps = BeatmapManager::instance().loadAllFromDirectory(targetDir, &errors);
 
-    m_songListWidget->clear();
-    for (const auto &map : m_loadedBeatmaps) {
-        QString itemText = QStringLiteral("%1 — %2\n[%3 • %4]")
-            .arg(map.meta.artist, map.meta.title, map.meta.difficultyName, map.formattedBpm());
-        m_songListWidget->addItem(itemText);
+    {
+        const QSignalBlocker blocker(m_songListWidget);
+        m_songListWidget->clear();
+        for (const auto &map : m_loadedBeatmaps) {
+            QString itemText = QStringLiteral("%1 — %2\n[%3 • %4]")
+                .arg(map.meta.artist, map.meta.title, map.meta.difficultyName, map.formattedBpm());
+            m_songListWidget->addItem(itemText);
+        }
+
+        if (!m_loadedBeatmaps.isEmpty()) {
+            m_songListWidget->setCurrentRow(0);
+        }
     }
 
     updateEmptyStateVisibility();
 
     if (!m_loadedBeatmaps.isEmpty()) {
-        m_songListWidget->setCurrentRow(0);
+        updateDetailsCard(m_loadedBeatmaps[0]);
     }
 }
 

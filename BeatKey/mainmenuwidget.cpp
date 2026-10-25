@@ -154,7 +154,7 @@ void MainMenuWidget::setupUi()
     ));
     refreshProfileInfo();
 
-    auto *versionLabel = new QLabel(QStringLiteral("BeatKey v0.1 • Qt 6.11"), this);
+    auto *versionLabel = new QLabel(QStringLiteral("BeatKey v0.2"), this);
     versionLabel->setStyleSheet(QStringLiteral(
         "color: #706a84;"
         "font-family: 'Segoe UI', sans-serif;"
@@ -172,6 +172,6 @@ void MainMenuWidget::refreshProfileInfo()
 {
     if (m_playerLabel) {
         QString nick = SettingsManager::instance().nickname();
-        m_playerLabel->setText(QStringLiteral("👤 Игрок: <b style='color:#a259ff;'>%1</b>").arg(nick));
+        m_playerLabel->setText(QStringLiteral("Игрок: <b style='color:#a259ff;'>%1</b>").arg(nick));
     }
 }

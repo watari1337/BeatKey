@@ -168,7 +168,7 @@ QWidget* SettingsWidget::createSection(const QString &titleText, QWidget *conten
 
 QSlider* SettingsWidget::createVolumeSlider(int initialVal, QLabel *valLabel)
 {
-    auto *slider = new QSlider(Qt::Horizontal, this);
+    auto *slider = new ClickableSlider(Qt::Horizontal, this);
     slider->setRange(0, 100);
     slider->setValue(initialVal);
     slider->setStyleSheet(Theme::sliderStyle());
@@ -263,7 +263,7 @@ void SettingsWidget::setupUi()
 
         layout->addWidget(label);
         layout->addWidget(m_nickEdit, 1);
-        contentLayout->addWidget(createSection(QStringLiteral("👤 Профиль игрока"), playerContent));
+        contentLayout->addWidget(createSection(QStringLiteral("Профиль игрока"), playerContent));
     }
 
     // 2. Audio Section
@@ -274,22 +274,24 @@ void SettingsWidget::setupUi()
         grid->setContentsMargins(0, 0, 0, 0);
         grid->setSpacing(12);
 
+        const auto &mgr = SettingsManager::instance();
+
         m_masterValLabel = new QLabel(audioContent);
-        m_masterSlider = createVolumeSlider(SettingsManager::DEFAULT_MASTER_VOLUME, m_masterValLabel);
+        m_masterSlider = createVolumeSlider(mgr.masterVolume(), m_masterValLabel);
         connect(m_masterSlider, &QSlider::valueChanged, this, [](int v) {
             SettingsManager::instance().setMasterVolume(v);
             SettingsManager::instance().saveSettings();
         });
 
         m_musicValLabel = new QLabel(audioContent);
-        m_musicSlider = createVolumeSlider(SettingsManager::DEFAULT_MUSIC_VOLUME, m_musicValLabel);
+        m_musicSlider = createVolumeSlider(mgr.musicVolume(), m_musicValLabel);
         connect(m_musicSlider, &QSlider::valueChanged, this, [](int v) {
             SettingsManager::instance().setMusicVolume(v);
             SettingsManager::instance().saveSettings();
         });
 
         m_sfxValLabel = new QLabel(audioContent);
-        m_sfxSlider = createVolumeSlider(SettingsManager::DEFAULT_SFX_VOLUME, m_sfxValLabel);
+        m_sfxSlider = createVolumeSlider(mgr.sfxVolume(), m_sfxValLabel);
         connect(m_sfxSlider, &QSlider::valueChanged, this, [](int v) {
             SettingsManager::instance().setSfxVolume(v);
             SettingsManager::instance().saveSettings();
@@ -307,7 +309,7 @@ void SettingsWidget::setupUi()
         grid->addWidget(m_sfxSlider, 2, 1);
         grid->addWidget(m_sfxValLabel, 2, 2);
 
-        contentLayout->addWidget(createSection(QStringLiteral("🔊 Звуковые параметры"), audioContent));
+        contentLayout->addWidget(createSection(QStringLiteral("Звуковые параметры"), audioContent));
     }
 
     // 3. Controls Section
@@ -340,7 +342,7 @@ void SettingsWidget::setupUi()
         layout->addLayout(secBox);
         layout->addStretch(1);
 
-        contentLayout->addWidget(createSection(QStringLiteral("⌨ Управление ритм-игрой"), controlsContent));
+        contentLayout->addWidget(createSection(QStringLiteral("Управление ритм-игрой"), controlsContent));
     }
 
     // 4. Calibration Section
@@ -396,7 +398,7 @@ void SettingsWidget::setupUi()
         hbox->addWidget(plus10Btn);
         hbox->addStretch(1);
 
-        m_autoCalibBtn = new QPushButton(QStringLiteral("⚡ Запустить автокалибровку задержки (10 ударов)"), calibContent);
+        m_autoCalibBtn = new QPushButton(QStringLiteral("Запустить автокалибровку задержки (10 ударов)"), calibContent);
         m_autoCalibBtn->setCursor(Qt::PointingHandCursor);
         m_autoCalibBtn->setStyleSheet(Theme::primaryButtonStyle());
         connect(m_autoCalibBtn, &QPushButton::clicked, this, &SettingsWidget::startAutoCalibration);
@@ -404,7 +406,7 @@ void SettingsWidget::setupUi()
         vbox->addLayout(hbox);
         vbox->addWidget(m_autoCalibBtn);
 
-        contentLayout->addWidget(createSection(QStringLiteral("⏱ Синхронизация и калибровка"), calibContent));
+        contentLayout->addWidget(createSection(QStringLiteral("Синхронизация и калибровка"), calibContent));
     }
 
     // 5. Video Section (2 режима: оконный и полноэкранный)
@@ -420,8 +422,8 @@ void SettingsWidget::setupUi()
 
         m_screenModeCombo = new QComboBox(videoContent);
         m_screenModeCombo->setStyleSheet(Theme::comboBoxStyle());
-        m_screenModeCombo->addItem(QStringLiteral("Оконный режим (1280×720)"), false);
-        m_screenModeCombo->addItem(QStringLiteral("Полноэкранный режим (Fullscreen)"), true);
+        m_screenModeCombo->addItem(QStringLiteral("Оконный режим"), false);
+        m_screenModeCombo->addItem(QStringLiteral("Полноэкранный режим"), true);
 
         // При выборе режима сразу переключаем экран и сохраняем настройку
         connect(m_screenModeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -435,7 +437,7 @@ void SettingsWidget::setupUi()
         layout->addWidget(m_screenModeCombo);
         layout->addStretch(1);
 
-        contentLayout->addWidget(createSection(QStringLiteral("🖥 Отображение экрана"), videoContent));
+        contentLayout->addWidget(createSection(QStringLiteral("Отображение экрана"), videoContent));
     }
 
     scrollArea->setWidget(contentWidget);
@@ -470,14 +472,23 @@ void SettingsWidget::loadFromSettingsManager()
     if (m_masterSlider) {
         const QSignalBlocker blocker(m_masterSlider);
         m_masterSlider->setValue(mgr.masterVolume());
+        if (m_masterValLabel) {
+            m_masterValLabel->setText(QString::number(mgr.masterVolume()) + QStringLiteral("%"));
+        }
     }
     if (m_musicSlider) {
         const QSignalBlocker blocker(m_musicSlider);
         m_musicSlider->setValue(mgr.musicVolume());
+        if (m_musicValLabel) {
+            m_musicValLabel->setText(QString::number(mgr.musicVolume()) + QStringLiteral("%"));
+        }
     }
     if (m_sfxSlider) {
         const QSignalBlocker blocker(m_sfxSlider);
         m_sfxSlider->setValue(mgr.sfxVolume());
+        if (m_sfxValLabel) {
+            m_sfxValLabel->setText(QString::number(mgr.sfxVolume()) + QStringLiteral("%"));
+        }
     }
     if (m_primaryKeyBtn) {
         const QSignalBlocker blocker(m_primaryKeyBtn);

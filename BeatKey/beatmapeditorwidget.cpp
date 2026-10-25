@@ -451,7 +451,7 @@ void BeatmapEditorWidget::setupUi()
     sliderRow->setContentsMargins(0, 4, 0, 0);
     sliderRow->setSpacing(8);
 
-    m_scrubSlider = new QSlider(Qt::Horizontal, topBarContainer);
+    m_scrubSlider = new ClickableSlider(Qt::Horizontal, topBarContainer);
     m_scrubSlider->setFocusPolicy(Qt::NoFocus);
     m_scrubSlider->setRange(0, m_totalDurationMs);
     m_scrubSlider->setValue(0);

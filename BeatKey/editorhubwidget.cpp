@@ -309,17 +309,24 @@ void EditorHubWidget::refreshMapList()
     QStringList errors;
     m_loadedBeatmaps = BeatmapManager::instance().loadAllFromDirectory(targetDir, &errors);
 
-    m_mapListWidget->clear();
-    for (const auto &map : m_loadedBeatmaps) {
-        QString itemText = QStringLiteral("%1 — %2\n[%3 • %4]")
-            .arg(map.meta.artist, map.meta.title, map.meta.difficultyName, map.formattedBpm());
-        m_mapListWidget->addItem(itemText);
+    {
+        const QSignalBlocker blocker(m_mapListWidget);
+        m_mapListWidget->clear();
+        for (const auto &map : m_loadedBeatmaps) {
+            QString itemText = QStringLiteral("%1 — %2\n[%3 • %4]")
+                .arg(map.meta.artist, map.meta.title, map.meta.difficultyName, map.formattedBpm());
+            m_mapListWidget->addItem(itemText);
+        }
+
+        if (!m_loadedBeatmaps.isEmpty()) {
+            m_mapListWidget->setCurrentRow(0);
+        }
     }
 
     updateEmptyStateVisibility();
 
     if (!m_loadedBeatmaps.isEmpty()) {
-        m_mapListWidget->setCurrentRow(0);
+        updateDetailsCard(m_loadedBeatmaps[0]);
     }
 }
 
