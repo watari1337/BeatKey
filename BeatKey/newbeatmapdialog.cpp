@@ -290,13 +290,7 @@ void NewBeatmapDialog::setupUi()
     // Difficulty
     advLayout->addWidget(createFieldLabel(QStringLiteral("Сложность"), m_advancedContainer));
     m_difficultyCombo = new QComboBox(m_advancedContainer);
-    m_difficultyCombo->addItems({
-        QStringLiteral("Легко"),
-        QStringLiteral("Нормально"),
-        QStringLiteral("Сложно"),
-        QStringLiteral("Эксперт"),
-        QStringLiteral("Мастер")
-    });
+    m_difficultyCombo->addItems(BeatmapDifficulties::ALL);
     m_difficultyCombo->setCurrentIndex(1); // "Нормально"
     m_difficultyCombo->setStyleSheet(Theme::comboBoxStyle());
     m_difficultyCombo->setCursor(Qt::PointingHandCursor);

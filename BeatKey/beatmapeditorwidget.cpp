@@ -752,7 +752,7 @@ QWidget* BeatmapEditorWidget::createEditorPage()
     // Scrubber above notes canvas
     m_scrubSlider = new ClickableSlider(Qt::Horizontal, centerContainer);
     m_scrubSlider->setFocusPolicy(Qt::NoFocus);
-    m_scrubSlider->setRange(0, m_totalDurationMs);
+    m_scrubSlider->setRange(0, 0);
     m_scrubSlider->setValue(0);
     m_scrubSlider->setCursor(Qt::PointingHandCursor);
     m_scrubSlider->setStyleSheet(Theme::sliderStyle());
@@ -1190,13 +1190,7 @@ QWidget* BeatmapEditorWidget::createDescriptionPage()
     auto *diffLbl = new QLabel(QStringLiteral("Сложность карты:"), rightCard);
     diffLbl->setStyleSheet(Theme::secondaryLabelStyle());
     m_metaDiffCombo = new QComboBox(rightCard);
-    m_metaDiffCombo->addItems({
-        QStringLiteral("Легкая"),
-        QStringLiteral("Нормальная"),
-        QStringLiteral("Сложная"),
-        QStringLiteral("Эксперт"),
-        QStringLiteral("Безумная")
-    });
+    m_metaDiffCombo->addItems(BeatmapDifficulties::ALL);
     m_metaDiffCombo->setStyleSheet(Theme::comboBoxStyle());
     m_metaDiffCombo->setCursor(Qt::PointingHandCursor);
     connect(m_metaDiffCombo, &QComboBox::currentIndexChanged, this, &BeatmapEditorWidget::handleDifficultyChanged);
@@ -1501,7 +1495,7 @@ void BeatmapEditorWidget::setMapDuration(int durationMs)
     m_timelineCanvas->setTotalDuration(m_totalDurationMs);
 
     if (m_scrubSlider) {
-        m_scrubSlider->setRange(0, m_totalDurationMs);
+        m_scrubSlider->setRange(0, qMax(0, m_timelineCanvas->maxScrollTime()));
     }
     if (m_metaDurationSpin) {
         m_metaDurationSpin->blockSignals(true);
@@ -1540,9 +1534,13 @@ void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &aud
     m_metaMapperEdit->setText(m_currentBeatmap.meta.mapper);
     m_metaArtistEdit->setText(m_currentBeatmap.meta.artist);
 
-    int diffIdx = m_metaDiffCombo->findText(m_currentBeatmap.meta.difficultyName);
+    QString canonicalDiff = BeatmapDifficulties::canonicalDifficulty(m_currentBeatmap.meta.difficultyName);
+    m_currentBeatmap.meta.difficultyName = canonicalDiff;
+    int diffIdx = m_metaDiffCombo->findText(canonicalDiff);
     if (diffIdx != -1) {
         m_metaDiffCombo->setCurrentIndex(diffIdx);
+    } else {
+        m_metaDiffCombo->setCurrentIndex(1);
     }
 
     if (m_currentBeatmap.meta.bpm <= 0.0) {
@@ -1764,16 +1762,16 @@ void BeatmapEditorWidget::handleSeekRequested(int timeMs)
     }
 }
 
-void BeatmapEditorWidget::handleScrollChanged(int scrollTimeMs, int totalDurationMs, int visibleMs)
+void BeatmapEditorWidget::handleScrollChanged(int scrollTimeMs, int maxScrollMs, int visibleMs)
 {
     Q_UNUSED(visibleMs);
     if (!m_isAutoScrolling) {
         m_userScrolledAway = true;
     }
-    if (m_totalDurationMs > 0 && m_scrubSlider && !m_isScrubbing) {
+    if (m_scrubSlider && !m_isScrubbing) {
         m_scrubSlider->blockSignals(true);
-        m_scrubSlider->setRange(0, totalDurationMs);
-        m_scrubSlider->setValue(scrollTimeMs);
+        m_scrubSlider->setRange(0, qMax(0, maxScrollMs));
+        m_scrubSlider->setValue(qBound(0, scrollTimeMs, qMax(0, maxScrollMs)));
         m_scrubSlider->blockSignals(false);
     }
 }
@@ -2275,11 +2273,6 @@ bool BeatmapEditorWidget::validateMapData(QString *errorMessage)
     QString audioExt = QFileInfo(m_sourceAudioPath).suffix().toLower();
     if (audioExt != QStringLiteral("mp3") && audioExt != QStringLiteral("wav") && audioExt != QStringLiteral("ogg")) {
         if (errorMessage) *errorMessage = QStringLiteral("Неподдерживаемый аудиоформат '%1'. Поддерживаются .mp3, .wav, .ogg.").arg(audioExt);
-        return false;
-    }
-
-    if (m_currentBeatmap.notes.isEmpty()) {
-        if (errorMessage) *errorMessage = QStringLiteral("Карта не содержит нот. Разместите хотя бы одну ноту на таймлайне.");
         return false;
     }
 

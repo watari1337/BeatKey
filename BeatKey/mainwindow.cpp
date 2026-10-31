@@ -163,6 +163,10 @@ void MainWindow::switchToScreen(ScreenIndex index)
         AudioManager::instance().stopMusic();
     } else if (m_stackedWidget->currentIndex() == Screen_Editor) {
         m_editorWidget->stopPlayback();
+        if (index == Screen_MainMenu) {
+            AudioManager::instance().playMenuMusic();
+        }
+    } else if (index == Screen_MainMenu) {
         AudioManager::instance().playMenuMusic();
     }
 

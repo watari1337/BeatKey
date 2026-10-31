@@ -90,7 +90,7 @@ private slots:
     void handleNotesBatchDeleteRequested(const QVector<NoteData> &notes);
     void handleNotesMoved(const QVector<int> &originalTimes, int deltaMs);
     void handleSelectionChanged(const QVector<int> &selectedIndices);
-    void handleScrollChanged(int scrollTimeMs, int totalDurationMs, int visibleMs);
+    void handleScrollChanged(int scrollTimeMs, int maxScrollMs, int visibleMs);
     void handleHoverInfoChanged(int timeMs, int measure, double beatInMeasure);
 
     // Modes & Tools

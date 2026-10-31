@@ -145,6 +145,15 @@ void SongSelectWidget::setupUi()
     ));
     connect(m_songListWidget, &QListWidget::currentRowChanged,
             this, &SongSelectWidget::handleSongSelected);
+    connect(m_songListWidget, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+        int row = m_songListWidget->row(item);
+        if (row >= 0 && row < m_loadedBeatmaps.size()) {
+            const Beatmap &map = m_loadedBeatmaps[row];
+            if (!AudioManager::instance().isMusicPlaying()) {
+                playPreview(map);
+            }
+        }
+    });
 
     contentLayout->addWidget(m_songListWidget);
 
@@ -338,7 +347,11 @@ void SongSelectWidget::refreshSongList()
     updateEmptyStateVisibility();
 
     if (!m_loadedBeatmaps.isEmpty()) {
+        m_songListWidget->scrollToTop();
         updateDetailsCard(m_loadedBeatmaps[0]);
+        playPreview(m_loadedBeatmaps[0]);
+    } else {
+        AudioManager::instance().playMenuMusic();
     }
 }
 
@@ -371,6 +384,18 @@ void SongSelectWidget::handleImportFolder()
     refreshSongList();
 }
 
+void SongSelectWidget::playPreview(const Beatmap &map)
+{
+    if (!map.extractedAudioPath.isEmpty() && QFile::exists(map.extractedAudioPath)) {
+        AudioManager::instance().playTrack(map.extractedAudioPath, true);
+        if (map.meta.previewTimeMs > 0) {
+            AudioManager::instance().setPositionMs(map.meta.previewTimeMs);
+        }
+    } else {
+        AudioManager::instance().stopMusic();
+    }
+}
+
 void SongSelectWidget::handleSongSelected(int row)
 {
     if (row < 0 || row >= m_loadedBeatmaps.size()) return;
@@ -378,14 +403,7 @@ void SongSelectWidget::handleSongSelected(int row)
     AudioManager::instance().playClickSound();
     const Beatmap &map = m_loadedBeatmaps[row];
     updateDetailsCard(map);
-
-    // Запускаем предпрослушивание трека
-    if (!map.extractedAudioPath.isEmpty()) {
-        AudioManager::instance().playTrack(map.extractedAudioPath, true);
-        if (map.meta.previewTimeMs > 0) {
-            AudioManager::instance().setPositionMs(map.meta.previewTimeMs);
-        }
-    }
+    playPreview(map);
 }
 
 void SongSelectWidget::updateDetailsCard(const Beatmap &map)
@@ -394,7 +412,7 @@ void SongSelectWidget::updateDetailsCard(const Beatmap &map)
     m_artistLabel->setText(map.meta.artist.isEmpty() ? QStringLiteral("Неизвестный исполнитель") : map.meta.artist);
     m_mapperLabel->setText(QStringLiteral("Карта: %1").arg(map.meta.mapper.isEmpty() ? QStringLiteral("Аноним") : map.meta.mapper));
 
-    m_difficultyLabel->setText(map.meta.difficultyName.isEmpty() ? QStringLiteral("Normal") : map.meta.difficultyName);
+    m_difficultyLabel->setText(map.meta.difficultyName.isEmpty() ? BeatmapDifficulties::DEFAULT_DIFFICULTY : BeatmapDifficulties::canonicalDifficulty(map.meta.difficultyName));
     m_bpmLabel->setText(map.formattedBpm());
     m_notesCountLabel->setText(QString::number(map.totalNotes()));
     m_durationLabel->setText(map.formattedDuration());

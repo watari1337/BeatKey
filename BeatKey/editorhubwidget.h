@@ -44,6 +44,7 @@ private:
     void setupUi();
     void updateDetailsCard(const Beatmap &map);
     void updateEmptyStateVisibility();
+    void playPreview(const Beatmap &map);
 
     QVector<Beatmap> m_loadedBeatmaps;
 

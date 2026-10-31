@@ -15,6 +15,7 @@
 #include <QDebug>
 #include <QFileDialog>
 #include <QStandardPaths>
+#include <QFile>
 
 EditorHubWidget::EditorHubWidget(QWidget *parent)
     : QWidget(parent)
@@ -143,6 +144,15 @@ void EditorHubWidget::setupUi()
     ));
     connect(m_mapListWidget, &QListWidget::currentRowChanged,
             this, &EditorHubWidget::handleMapSelected);
+    connect(m_mapListWidget, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
+        int row = m_mapListWidget->row(item);
+        if (row >= 0 && row < m_loadedBeatmaps.size()) {
+            const Beatmap &map = m_loadedBeatmaps[row];
+            if (!AudioManager::instance().isMusicPlaying()) {
+                playPreview(map);
+            }
+        }
+    });
 
     contentLayout->addWidget(m_mapListWidget);
 
@@ -337,7 +347,11 @@ void EditorHubWidget::refreshMapList()
     updateEmptyStateVisibility();
 
     if (!m_loadedBeatmaps.isEmpty()) {
+        m_mapListWidget->scrollToTop();
         updateDetailsCard(m_loadedBeatmaps[0]);
+        playPreview(m_loadedBeatmaps[0]);
+    } else {
+        AudioManager::instance().playMenuMusic();
     }
 }
 
@@ -408,6 +422,18 @@ void EditorHubWidget::handleCreateNewMap()
     }
 }
 
+void EditorHubWidget::playPreview(const Beatmap &map)
+{
+    if (!map.extractedAudioPath.isEmpty() && QFile::exists(map.extractedAudioPath)) {
+        AudioManager::instance().playTrack(map.extractedAudioPath, true);
+        if (map.meta.previewTimeMs > 0) {
+            AudioManager::instance().setPositionMs(map.meta.previewTimeMs);
+        }
+    } else {
+        AudioManager::instance().stopMusic();
+    }
+}
+
 void EditorHubWidget::handleMapSelected(int row)
 {
     if (row < 0 || row >= m_loadedBeatmaps.size()) return;
@@ -415,6 +441,7 @@ void EditorHubWidget::handleMapSelected(int row)
     AudioManager::instance().playClickSound();
     const Beatmap &map = m_loadedBeatmaps[row];
     updateDetailsCard(map);
+    playPreview(map);
 }
 
 void EditorHubWidget::updateDetailsCard(const Beatmap &map)
@@ -423,7 +450,7 @@ void EditorHubWidget::updateDetailsCard(const Beatmap &map)
     m_artistLabel->setText(map.meta.artist.isEmpty() ? QStringLiteral("Неизвестный исполнитель") : map.meta.artist);
     m_mapperLabel->setText(QStringLiteral("Карта: %1").arg(map.meta.mapper.isEmpty() ? QStringLiteral("Аноним") : map.meta.mapper));
 
-    m_difficultyLabel->setText(map.meta.difficultyName.isEmpty() ? QStringLiteral("Нормально") : map.meta.difficultyName);
+    m_difficultyLabel->setText(map.meta.difficultyName.isEmpty() ? BeatmapDifficulties::DEFAULT_DIFFICULTY : BeatmapDifficulties::canonicalDifficulty(map.meta.difficultyName));
     m_bpmLabel->setText(map.formattedBpm());
     m_notesCountLabel->setText(QString::number(map.totalNotes()));
     m_durationLabel->setText(map.formattedDuration());

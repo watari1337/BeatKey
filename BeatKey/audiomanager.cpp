@@ -18,6 +18,8 @@ AudioManager::AudioManager(QObject *parent)
     : QObject(parent)
     , m_musicPlayer(nullptr)
     , m_musicOutput(nullptr)
+    , m_currentTrackSource()
+    , m_pendingPositionMs(0)
     , m_sfxHit(nullptr)
     , m_sfxMiss(nullptr)
     , m_sfxComboBreak(nullptr)
@@ -48,6 +50,12 @@ void AudioManager::initMusicPlayer()
 
     connect(m_musicPlayer, &QMediaPlayer::positionChanged, this, &AudioManager::positionChanged);
     connect(m_musicPlayer, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+        if (status == QMediaPlayer::LoadedMedia || status == QMediaPlayer::BufferedMedia) {
+            if (m_pendingPositionMs > 0) {
+                m_musicPlayer->setPosition(m_pendingPositionMs);
+                m_pendingPositionMs = 0;
+            }
+        }
         if (status == QMediaPlayer::EndOfMedia) {
             emit trackFinished();
         }
@@ -107,6 +115,7 @@ void AudioManager::playTrack(const QString &sourcePath, bool loop)
         return; // Трек уже играет
     }
 
+    m_pendingPositionMs = 0;
     m_currentTrackSource = sourcePath;
     m_musicPlayer->stop();
     m_musicPlayer->setSource(resolveUrl(sourcePath));
@@ -131,6 +140,7 @@ void AudioManager::resumeMusic()
 void AudioManager::stopMusic()
 {
     m_musicPlayer->stop();
+    m_pendingPositionMs = 0;
     m_currentTrackSource.clear();
 }
 
@@ -162,7 +172,19 @@ qint64 AudioManager::trackDurationMs() const
 
 void AudioManager::setPositionMs(qint64 positionMs)
 {
-    m_musicPlayer->setPosition(positionMs);
+    if (positionMs <= 0) {
+        m_pendingPositionMs = 0;
+        m_musicPlayer->setPosition(0);
+        return;
+    }
+
+    auto status = m_musicPlayer->mediaStatus();
+    if (status == QMediaPlayer::LoadedMedia || status == QMediaPlayer::BufferedMedia) {
+        m_musicPlayer->setPosition(positionMs);
+        m_pendingPositionMs = 0;
+    } else {
+        m_pendingPositionMs = positionMs;
+    }
 }
 
 // ============================================================================
