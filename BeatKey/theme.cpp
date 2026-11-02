@@ -202,6 +202,64 @@ QString menuExitButtonStyle()
     );
 }
 
+QString dialogCloseButtonStyle()
+{
+    return QStringLiteral(
+        "QPushButton {"
+        "  background: transparent;"
+        "  color: #a09cb0;"
+        "  border: none;"
+        "  font-size: 16px;"
+        "  font-weight: bold;"
+        "  border-radius: 14px;"
+        "}"
+        "QPushButton:hover {"
+        "  background: rgba(255, 255, 255, 0.08);"
+        "  color: #ffffff;"
+        "}"
+        "QPushButton:pressed {"
+        "  background: rgba(255, 255, 255, 0.15);"
+        "  color: #bb9af7;"
+        "}"
+    );
+}
+
+QString dialogTitleStyle()
+{
+    return QStringLiteral(
+        "font-family: 'Segoe UI', sans-serif;"
+        "font-size: 20px;"
+        "font-weight: bold;"
+        "color: #ffffff;"
+        "background: transparent;"
+        "border: none;"
+    );
+}
+
+QString dialogErrorTitleStyle()
+{
+    return QStringLiteral(
+        "font-family: 'Segoe UI', sans-serif;"
+        "font-size: 19px;"
+        "font-weight: bold;"
+        "color: #ff5577;"
+        "background: transparent;"
+        "border: none;"
+    );
+}
+
+QString dialogMessageStyle()
+{
+    return QStringLiteral(
+        "font-family: 'Segoe UI', sans-serif;"
+        "font-size: 14px;"
+        "color: #e0dced;"
+        "line-height: 1.4;"
+        "background: transparent;"
+        "border: none;"
+    );
+}
+
 QString sectionBoxStyle()
 {
     return QStringLiteral(

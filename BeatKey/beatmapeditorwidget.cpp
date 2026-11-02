@@ -6,6 +6,7 @@
 #include "editorcommands.h"
 #include "editorhelpdialog.h"
 #include "theme.h"
+#include "covermanager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -217,8 +218,7 @@ void BeatmapEditorWidget::updateCachedBackground()
         bgPixmap = m_currentBeatmap.coverImage;
     }
     if (bgPixmap.isNull()) {
-        static QPixmap defaultBg(QStringLiteral(":/assets/images/standard_bg2.jpg"));
-        bgPixmap = defaultBg;
+        bgPixmap = CoverManager::standardCoverPixmap(CoverManager::StandardCover::Standard2);
     }
     if (bgPixmap.isNull()) {
         m_cachedBackgroundPixmap = QPixmap();
@@ -1328,8 +1328,7 @@ void BeatmapEditorWidget::updateCoverPreview()
         pix = m_currentBeatmap.coverImage;
     }
     if (pix.isNull()) {
-        static QPixmap defaultBg(QStringLiteral(":/assets/images/standard_bg2.jpg"));
-        pix = defaultBg;
+        pix = CoverManager::standardCoverPixmap(CoverManager::StandardCover::Standard2);
     }
 
     if (!pix.isNull()) {
@@ -2185,21 +2184,30 @@ void BeatmapEditorWidget::handleChooseCover()
         this,
         QStringLiteral("Выберите файл обложки карты"),
         desktopPath,
-        QStringLiteral("Изображения (*.png *.jpg *.jpeg);;Все файлы (*.*)")
+        CoverManager::coverFilter()
     );
-    if (!filePath.isEmpty()) {
-        m_isMetadataModified = true;
-        m_sourceCoverPath = filePath;
-        m_currentBeatmap.meta.coverFileName = QFileInfo(filePath).fileName();
-        m_currentBeatmap.coverImage.load(filePath);
-        m_metaCoverLabel->setText(QFileInfo(filePath).fileName());
-        updateCoverPreview();
-        updateCachedBackground();
-        m_saveStatusLabel->setText(QStringLiteral("Обложка карты выбрана!"));
-        m_saveStatusLabel->setVisible(true);
-        QTimer::singleShot(2500, this, [this]() { m_saveStatusLabel->setVisible(false); });
-        update();
+    if (filePath.isEmpty()) {
+        return;
     }
+
+    QPixmap loadedPixmap;
+    QString errorMessage;
+    if (!CoverManager::validateAndLoadCover(filePath, &loadedPixmap, &errorMessage)) {
+        CoverManager::showMediaErrorDialog(this, QStringLiteral("Ошибка выбора обложки"), errorMessage);
+        return;
+    }
+
+    m_isMetadataModified = true;
+    m_sourceCoverPath = filePath;
+    m_currentBeatmap.meta.coverFileName = QFileInfo(filePath).fileName();
+    m_currentBeatmap.coverImage = loadedPixmap;
+    m_metaCoverLabel->setText(QFileInfo(filePath).fileName());
+    updateCoverPreview();
+    updateCachedBackground();
+    m_saveStatusLabel->setText(QStringLiteral("Обложка карты выбрана!"));
+    m_saveStatusLabel->setVisible(true);
+    QTimer::singleShot(2500, this, [this]() { m_saveStatusLabel->setVisible(false); });
+    update();
 }
 
 void BeatmapEditorWidget::handleChooseAudio()
@@ -2210,35 +2218,42 @@ void BeatmapEditorWidget::handleChooseAudio()
         this,
         QStringLiteral("Выберите аудиофайл для карты"),
         desktopPath,
-        QStringLiteral("Музыкальные файлы (*.wav *.mp3 *.ogg);;Все файлы (*.*)")
+        CoverManager::audioFilter()
     );
-    if (!filePath.isEmpty()) {
-        m_isMetadataModified = true;
-        m_sourceAudioPath = filePath;
-        m_currentBeatmap.meta.audioFileName = QFileInfo(filePath).fileName();
-        if (m_metaAudioLabel) {
-            m_metaAudioLabel->setText(QFileInfo(filePath).fileName());
-        }
-        if (m_descAudioPathLabel) {
-            m_descAudioPathLabel->setText(QFileInfo(filePath).fileName());
-        }
-
-        // Stop current playback if active
-        if (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState) {
-            m_mediaPlayer->stop();
-        }
-
-        // Load new audio source into player and waveform decoder
-        m_mediaPlayer->setSource(QUrl::fromLocalFile(filePath));
-        m_waveform->load(filePath);
-
-        m_saveStatusLabel->setText(QStringLiteral("Аудиофайл карты обновлен!"));
-        m_saveStatusLabel->setVisible(true);
-        QTimer::singleShot(2500, this, [this]() { m_saveStatusLabel->setVisible(false); });
-        update();
+    if (filePath.isEmpty()) {
+        return;
     }
-}
 
+    QString errorMessage;
+    if (!CoverManager::validateAudioFile(filePath, &errorMessage)) {
+        CoverManager::showMediaErrorDialog(this, QStringLiteral("Ошибка выбора аудиофайла"), errorMessage);
+        return;
+    }
+
+    m_isMetadataModified = true;
+    m_sourceAudioPath = filePath;
+    m_currentBeatmap.meta.audioFileName = QFileInfo(filePath).fileName();
+    if (m_metaAudioLabel) {
+        m_metaAudioLabel->setText(QFileInfo(filePath).fileName());
+    }
+    if (m_descAudioPathLabel) {
+        m_descAudioPathLabel->setText(QFileInfo(filePath).fileName());
+    }
+
+    // Stop current playback if active
+    if (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState) {
+        m_mediaPlayer->stop();
+    }
+
+    // Load new audio source into player and waveform decoder
+    m_mediaPlayer->setSource(QUrl::fromLocalFile(filePath));
+    m_waveform->load(filePath);
+
+    m_saveStatusLabel->setText(QStringLiteral("Аудиофайл карты обновлен!"));
+    m_saveStatusLabel->setVisible(true);
+    QTimer::singleShot(2500, this, [this]() { m_saveStatusLabel->setVisible(false); });
+    update();
+}
 // ============================================================================
 // Data Structure Validation & Export
 // ============================================================================

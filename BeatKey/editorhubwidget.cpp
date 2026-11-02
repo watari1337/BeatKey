@@ -5,6 +5,7 @@
 #include "settingsmanager.h"
 #include "audiomanager.h"
 #include "theme.h"
+#include "covermanager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -457,8 +458,7 @@ void EditorHubWidget::updateDetailsCard(const Beatmap &map)
 
     QPixmap cover = map.coverImage;
     if (cover.isNull()) {
-        static QPixmap defaultBg(QStringLiteral(":/assets/images/standard_bg2.jpg"));
-        cover = defaultBg;
+        cover = CoverManager::standardCoverPixmap(CoverManager::StandardCover::Standard2);
     }
     if (!cover.isNull()) {
         m_coverArtLabel->setPixmap(cover.scaled(m_coverArtLabel->size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation));

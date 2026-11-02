@@ -9,6 +9,7 @@
 #include <QScrollArea>
 #include <QKeyEvent>
 #include <QMessageBox>
+#include <QDialog>
 #include <QGraphicsDropShadowEffect>
 #include <QPainter>
 
@@ -121,12 +122,15 @@ SettingsWidget::SettingsWidget(QWidget *parent)
     , m_musicValLabel(nullptr)
     , m_sfxSlider(nullptr)
     , m_sfxValLabel(nullptr)
+    , m_hitsoundSlider(nullptr)
+    , m_hitsoundValLabel(nullptr)
     , m_primaryKeyBtn(nullptr)
     , m_secondaryKeyBtn(nullptr)
     , m_offsetSpinBox(nullptr)
     , m_autoCalibBtn(nullptr)
     , m_screenModeCombo(nullptr)
     , m_resetBtn(nullptr)
+    , m_resetRecordsBtn(nullptr)
     , m_backBtn(nullptr)
 {
     setAttribute(Qt::WA_StyledBackground, true);
@@ -531,4 +535,354 @@ void SettingsWidget::startAutoCalibration()
                                             "Игрок нажимает основную клавишу в такт каждому клику.\n"
                                             "Система рассчитывает среднее отклонение (в миллисекундах) "
                                             "и автоматически выставляет компенсирующее значение Audio Offset."));
+}
+
+// ============================================================================
+// Easter-egg 8-step Local Records Reset
+// ============================================================================
+
+bool SettingsWidget::showConfirmStep(const QString &title, const QString &message, const QString &confirmText)
+{
+    AudioManager::instance().playClickSound();
+
+    QDialog dialog(this);
+    dialog.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+    dialog.setAttribute(Qt::WA_TranslucentBackground);
+    dialog.setModal(true);
+
+    auto *outerLayout = new QVBoxLayout(&dialog);
+    outerLayout->setContentsMargins(20, 20, 20, 20);
+
+    auto *container = new QWidget(&dialog);
+    container->setObjectName(QStringLiteral("dialogContainer"));
+    container->setStyleSheet(Theme::exitDialogContainerStyle());
+
+    auto *shadow = new QGraphicsDropShadowEffect(&dialog);
+    shadow->setBlurRadius(25);
+    shadow->setColor(QColor(0, 0, 0, 180));
+    shadow->setOffset(0, 8);
+    container->setGraphicsEffect(shadow);
+
+    auto *innerLayout = new QVBoxLayout(container);
+    innerLayout->setContentsMargins(24, 20, 24, 24);
+    innerLayout->setSpacing(18);
+
+    auto *headerLayout = new QHBoxLayout();
+    headerLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto *spacerLeft = new QWidget(container);
+    spacerLeft->setFixedSize(28, 28);
+    headerLayout->addWidget(spacerLeft);
+
+    auto *titleLabel = new QLabel(title, container);
+    titleLabel->setAlignment(Qt::AlignCenter);
+    titleLabel->setStyleSheet(Theme::dialogErrorTitleStyle());
+    headerLayout->addWidget(titleLabel, 1);
+
+    auto *closeBtn = new QPushButton(QStringLiteral("✕"), container);
+    closeBtn->setCursor(Qt::PointingHandCursor);
+    closeBtn->setFixedSize(28, 28);
+    closeBtn->setStyleSheet(Theme::dialogCloseButtonStyle());
+    QObject::connect(closeBtn, &QPushButton::clicked, &dialog, [&dialog]() {
+        AudioManager::instance().playClickSound();
+        dialog.reject();
+    });
+    headerLayout->addWidget(closeBtn);
+    innerLayout->addLayout(headerLayout);
+
+    auto *msgLabel = new QLabel(message, container);
+    msgLabel->setAlignment(Qt::AlignCenter);
+    msgLabel->setWordWrap(true);
+    msgLabel->setStyleSheet(Theme::dialogMessageStyle());
+    innerLayout->addWidget(msgLabel);
+
+    auto *buttonLayout = new QHBoxLayout();
+    buttonLayout->setAlignment(Qt::AlignCenter);
+    buttonLayout->setSpacing(14);
+
+    auto *confirmBtn = new QPushButton(confirmText, container);
+    confirmBtn->setCursor(Qt::PointingHandCursor);
+    confirmBtn->setStyleSheet(Theme::dangerButtonStyle());
+    confirmBtn->setFixedHeight(40);
+    confirmBtn->setMinimumWidth(140);
+    QObject::connect(confirmBtn, &QPushButton::clicked, &dialog, [&dialog]() {
+        AudioManager::instance().playClickSound();
+        dialog.accept();
+    });
+    buttonLayout->addWidget(confirmBtn);
+
+    auto *cancelBtn = new QPushButton(QStringLiteral("Отмена"), container);
+    cancelBtn->setCursor(Qt::PointingHandCursor);
+    cancelBtn->setStyleSheet(Theme::secondaryButtonStyle());
+    cancelBtn->setFixedHeight(40);
+    cancelBtn->setMinimumWidth(110);
+    QObject::connect(cancelBtn, &QPushButton::clicked, &dialog, [&dialog]() {
+        AudioManager::instance().playClickSound();
+        dialog.reject();
+    });
+    buttonLayout->addWidget(cancelBtn);
+
+    innerLayout->addLayout(buttonLayout);
+    outerLayout->addWidget(container);
+
+    return dialog.exec() == QDialog::Accepted;
+}
+
+bool SettingsWidget::showInputStep(const QString &title, const QString &message, const QString &expectedText, bool caseSensitive)
+{
+    AudioManager::instance().playClickSound();
+
+    QDialog dialog(this);
+    dialog.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+    dialog.setAttribute(Qt::WA_TranslucentBackground);
+    dialog.setModal(true);
+
+    auto *outerLayout = new QVBoxLayout(&dialog);
+    outerLayout->setContentsMargins(20, 20, 20, 20);
+
+    auto *container = new QWidget(&dialog);
+    container->setObjectName(QStringLiteral("dialogContainer"));
+    container->setStyleSheet(Theme::exitDialogContainerStyle());
+
+    auto *shadow = new QGraphicsDropShadowEffect(&dialog);
+    shadow->setBlurRadius(25);
+    shadow->setColor(QColor(0, 0, 0, 180));
+    shadow->setOffset(0, 8);
+    container->setGraphicsEffect(shadow);
+
+    auto *innerLayout = new QVBoxLayout(container);
+    innerLayout->setContentsMargins(24, 20, 24, 24);
+    innerLayout->setSpacing(16);
+
+    auto *headerLayout = new QHBoxLayout();
+    headerLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto *spacerLeft = new QWidget(container);
+    spacerLeft->setFixedSize(28, 28);
+    headerLayout->addWidget(spacerLeft);
+
+    auto *titleLabel = new QLabel(title, container);
+    titleLabel->setAlignment(Qt::AlignCenter);
+    titleLabel->setStyleSheet(Theme::dialogErrorTitleStyle());
+    headerLayout->addWidget(titleLabel, 1);
+
+    auto *closeBtn = new QPushButton(QStringLiteral("✕"), container);
+    closeBtn->setCursor(Qt::PointingHandCursor);
+    closeBtn->setFixedSize(28, 28);
+    closeBtn->setStyleSheet(Theme::dialogCloseButtonStyle());
+    QObject::connect(closeBtn, &QPushButton::clicked, &dialog, [&dialog]() {
+        AudioManager::instance().playClickSound();
+        dialog.reject();
+    });
+    headerLayout->addWidget(closeBtn);
+    innerLayout->addLayout(headerLayout);
+
+    auto *msgLabel = new QLabel(message, container);
+    msgLabel->setAlignment(Qt::AlignCenter);
+    msgLabel->setWordWrap(true);
+    msgLabel->setStyleSheet(Theme::dialogMessageStyle());
+    innerLayout->addWidget(msgLabel);
+
+    auto *lineEdit = new QLineEdit(container);
+    lineEdit->setStyleSheet(Theme::lineEditStyle());
+    lineEdit->setFixedHeight(36);
+    innerLayout->addWidget(lineEdit);
+
+    auto *errorLabel = new QLabel(container);
+    errorLabel->setAlignment(Qt::AlignCenter);
+    errorLabel->setStyleSheet(QStringLiteral("color: #e57388; font-size: 12px; background: transparent; border: none;"));
+    errorLabel->setVisible(false);
+    innerLayout->addWidget(errorLabel);
+
+    auto *buttonLayout = new QHBoxLayout();
+    buttonLayout->setAlignment(Qt::AlignCenter);
+    buttonLayout->setSpacing(14);
+
+    auto *confirmBtn = new QPushButton(QStringLiteral("Подтвердить"), container);
+    confirmBtn->setCursor(Qt::PointingHandCursor);
+    confirmBtn->setStyleSheet(Theme::dangerButtonStyle());
+    confirmBtn->setFixedHeight(40);
+    confirmBtn->setMinimumWidth(130);
+
+    auto checkAndAccept = [&]() {
+        QString entered = lineEdit->text().trimmed();
+        bool match = caseSensitive
+            ? (entered == expectedText.trimmed())
+            : (entered.compare(expectedText.trimmed(), Qt::CaseInsensitive) == 0);
+
+        if (match) {
+            AudioManager::instance().playClickSound();
+            dialog.accept();
+        } else {
+            AudioManager::instance().playMissSound();
+            lineEdit->setStyleSheet(Theme::errorLineEditStyle());
+            errorLabel->setText(QStringLiteral("Введено неверное значение!"));
+            errorLabel->setVisible(true);
+        }
+    };
+
+    QObject::connect(confirmBtn, &QPushButton::clicked, &dialog, checkAndAccept);
+    QObject::connect(lineEdit, &QLineEdit::returnPressed, &dialog, checkAndAccept);
+    buttonLayout->addWidget(confirmBtn);
+
+    auto *cancelBtn = new QPushButton(QStringLiteral("Отмена"), container);
+    cancelBtn->setCursor(Qt::PointingHandCursor);
+    cancelBtn->setStyleSheet(Theme::secondaryButtonStyle());
+    cancelBtn->setFixedHeight(40);
+    cancelBtn->setMinimumWidth(110);
+    QObject::connect(cancelBtn, &QPushButton::clicked, &dialog, [&dialog]() {
+        AudioManager::instance().playClickSound();
+        dialog.reject();
+    });
+    buttonLayout->addWidget(cancelBtn);
+
+    innerLayout->addLayout(buttonLayout);
+    outerLayout->addWidget(container);
+
+    lineEdit->setFocus();
+    return dialog.exec() == QDialog::Accepted;
+}
+
+void SettingsWidget::showFinalInfo(const QString &title, const QString &message)
+{
+    AudioManager::instance().playClearSound();
+
+    QDialog dialog(this);
+    dialog.setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+    dialog.setAttribute(Qt::WA_TranslucentBackground);
+    dialog.setModal(true);
+
+    auto *outerLayout = new QVBoxLayout(&dialog);
+    outerLayout->setContentsMargins(20, 20, 20, 20);
+
+    auto *container = new QWidget(&dialog);
+    container->setObjectName(QStringLiteral("dialogContainer"));
+    container->setStyleSheet(Theme::exitDialogContainerStyle());
+
+    auto *shadow = new QGraphicsDropShadowEffect(&dialog);
+    shadow->setBlurRadius(25);
+    shadow->setColor(QColor(0, 0, 0, 180));
+    shadow->setOffset(0, 8);
+    container->setGraphicsEffect(shadow);
+
+    auto *innerLayout = new QVBoxLayout(container);
+    innerLayout->setContentsMargins(24, 20, 24, 24);
+    innerLayout->setSpacing(18);
+
+    auto *headerLayout = new QHBoxLayout();
+    headerLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto *spacerLeft = new QWidget(container);
+    spacerLeft->setFixedSize(28, 28);
+    headerLayout->addWidget(spacerLeft);
+
+    auto *titleLabel = new QLabel(title, container);
+    titleLabel->setAlignment(Qt::AlignCenter);
+    titleLabel->setStyleSheet(Theme::dialogTitleStyle());
+    headerLayout->addWidget(titleLabel, 1);
+
+    auto *closeBtn = new QPushButton(QStringLiteral("✕"), container);
+    closeBtn->setCursor(Qt::PointingHandCursor);
+    closeBtn->setFixedSize(28, 28);
+    closeBtn->setStyleSheet(Theme::dialogCloseButtonStyle());
+    QObject::connect(closeBtn, &QPushButton::clicked, &dialog, [&dialog]() {
+        AudioManager::instance().playClickSound();
+        dialog.accept();
+    });
+    headerLayout->addWidget(closeBtn);
+    innerLayout->addLayout(headerLayout);
+
+    auto *msgLabel = new QLabel(message, container);
+    msgLabel->setAlignment(Qt::AlignCenter);
+    msgLabel->setWordWrap(true);
+    msgLabel->setStyleSheet(Theme::dialogMessageStyle());
+    innerLayout->addWidget(msgLabel);
+
+    auto *buttonLayout = new QHBoxLayout();
+    buttonLayout->setAlignment(Qt::AlignCenter);
+
+    auto *okBtn = new QPushButton(QStringLiteral("ОК"), container);
+    okBtn->setCursor(Qt::PointingHandCursor);
+    okBtn->setStyleSheet(Theme::primaryButtonStyle());
+    okBtn->setFixedHeight(40);
+    okBtn->setMinimumWidth(130);
+    QObject::connect(okBtn, &QPushButton::clicked, &dialog, [&dialog]() {
+        AudioManager::instance().playClickSound();
+        dialog.accept();
+    });
+    buttonLayout->addWidget(okBtn);
+    innerLayout->addLayout(buttonLayout);
+
+    outerLayout->addWidget(container);
+    dialog.exec();
+}
+
+void SettingsWidget::handleResetRecords()
+{
+    AudioManager::instance().playClickSound();
+
+    // 1. точно ли вы уверен
+    if (!showConfirmStep(QStringLiteral("Предупреждение (1/8)"),
+                         QStringLiteral("Точно ли вы уверены?"),
+                         QStringLiteral("Да, уверен"))) {
+        return;
+    }
+
+    // 2. это без возратно удалит ваши рекорды
+    if (!showConfirmStep(QStringLiteral("Предупреждение (2/8)"),
+                         QStringLiteral("Это безвозвратно удалит ваши рекорды!"),
+                         QStringLiteral("Я понимаю риск"))) {
+        return;
+    }
+
+    // 3. вы понимаете что делаете?
+    if (!showConfirmStep(QStringLiteral("Предупреждение (3/8)"),
+                         QStringLiteral("Вы понимаете, что делаете?"),
+                         QStringLiteral("Да, абсолютно"))) {
+        return;
+    }
+
+    // 4. введите капосом слово удалить чтобы подтвердить свои действия
+    if (!showInputStep(QStringLiteral("Предупреждение (4/8)"),
+                       QStringLiteral("Введите капсом слово УДАЛИТЬ, чтобы подтвердить свои действия:"),
+                       QStringLiteral("УДАЛИТЬ"),
+                       true)) {
+        return;
+    }
+
+    // 5. вы никогда не вернёте свои рекорды!!
+    if (!showConfirmStep(QStringLiteral("Предупреждение (5/8)"),
+                         QStringLiteral("Вы никогда не вернете свои рекорды!!"),
+                         QStringLiteral("Все равно удалить"))) {
+        return;
+    }
+
+    // 6. введите свой ник чтобы подтвердить свои дейсвия
+    QString playerNick = SettingsManager::instance().nickname().trimmed();
+    if (playerNick.isEmpty()) {
+        playerNick = QStringLiteral("Player");
+    }
+    if (!showInputStep(QStringLiteral("Предупреждение (6/8)"),
+                       QStringLiteral("Введите свой ник (%1), чтобы подтвердить свои действия:").arg(playerNick),
+                       playerNick,
+                       false)) {
+        return;
+    }
+
+    // 7. вы сумасшедший?! зачем это делать, просто оставь те их
+    if (!showConfirmStep(QStringLiteral("Предупреждение (7/8)"),
+                         QStringLiteral("Вы сумасшедший?! Зачем это делать, просто оставьте их"),
+                         QStringLiteral("Нет, удаляй!"))) {
+        return;
+    }
+
+    // 8. ладно, это ваше решение.....
+    if (!showConfirmStep(QStringLiteral("Предупреждение (8/8)"),
+                         QStringLiteral("Ладно, это ваше решение....."),
+                         QStringLiteral("Очистить все"))) {
+        return;
+    }
+
+    // Финальное сообщение об очистке
+    showFinalInfo(QStringLiteral("Сброс рекордов"), QStringLiteral("Все локальные рекорды очищены!"));
 }

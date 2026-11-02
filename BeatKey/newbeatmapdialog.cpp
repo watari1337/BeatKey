@@ -2,6 +2,7 @@
 #include "settingsmanager.h"
 #include "audiomanager.h"
 #include "theme.h"
+#include "covermanager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -382,19 +383,27 @@ void NewBeatmapDialog::handleChooseAudio()
         this,
         QStringLiteral("Выберите аудиофайл для карты"),
         defaultDir,
-        QStringLiteral("Музыкальные файлы (*.mp3 *.wav *.ogg);;Все файлы (*.*)")
+        CoverManager::audioFilter()
     );
 
-    if (!filePath.isEmpty()) {
-        m_selectedAudioPath = filePath;
-        QFileInfo fi(filePath);
-        QFontMetrics fm(m_audioPathLabel->font());
-        QString elided = fm.elidedText(fi.fileName(), Qt::ElideMiddle, 230);
-        m_audioPathLabel->setText(elided);
-        m_audioPathLabel->setToolTip(filePath);
-        m_audioPathLabel->setStyleSheet(QStringLiteral("color: #2ecc71; font-size: 12px; font-weight: normal;"));
-        m_chooseAudioBtn->setStyleSheet(Theme::secondaryButtonStyle());
+    if (filePath.isEmpty()) {
+        return;
     }
+
+    QString errorMessage;
+    if (!CoverManager::validateAudioFile(filePath, &errorMessage)) {
+        CoverManager::showMediaErrorDialog(this, QStringLiteral("Ошибка выбора аудиофайла"), errorMessage);
+        return;
+    }
+
+    m_selectedAudioPath = filePath;
+    QFileInfo fi(filePath);
+    QFontMetrics fm(m_audioPathLabel->font());
+    QString elided = fm.elidedText(fi.fileName(), Qt::ElideMiddle, 230);
+    m_audioPathLabel->setText(elided);
+    m_audioPathLabel->setToolTip(filePath);
+    m_audioPathLabel->setStyleSheet(Theme::accentLabelStyle());
+    m_chooseAudioBtn->setStyleSheet(Theme::secondaryButtonStyle());
 }
 
 void NewBeatmapDialog::handleChooseCover()
@@ -406,18 +415,26 @@ void NewBeatmapDialog::handleChooseCover()
         this,
         QStringLiteral("Выберите обложку карты"),
         defaultDir,
-        QStringLiteral("Изображения (*.png *.jpg *.jpeg);;Все файлы (*.*)")
+        CoverManager::coverFilter()
     );
 
-    if (!filePath.isEmpty()) {
-        m_selectedCoverPath = filePath;
-        QFileInfo fi(filePath);
-        QFontMetrics fm(m_coverPathLabel->font());
-        QString elided = fm.elidedText(fi.fileName(), Qt::ElideMiddle, 230);
-        m_coverPathLabel->setText(elided);
-        m_coverPathLabel->setToolTip(filePath);
-        m_coverPathLabel->setStyleSheet(QStringLiteral("color: #2ecc71; font-size: 12px; font-weight: normal;"));
+    if (filePath.isEmpty()) {
+        return;
     }
+
+    QString errorMessage;
+    if (!CoverManager::validateAndLoadCover(filePath, nullptr, &errorMessage)) {
+        CoverManager::showMediaErrorDialog(this, QStringLiteral("Ошибка выбора обложки"), errorMessage);
+        return;
+    }
+
+    m_selectedCoverPath = filePath;
+    QFileInfo fi(filePath);
+    QFontMetrics fm(m_coverPathLabel->font());
+    QString elided = fm.elidedText(fi.fileName(), Qt::ElideMiddle, 230);
+    m_coverPathLabel->setText(elided);
+    m_coverPathLabel->setToolTip(filePath);
+    m_coverPathLabel->setStyleSheet(Theme::accentLabelStyle());
 }
 
 void NewBeatmapDialog::toggleAdvancedSettings()
