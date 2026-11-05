@@ -13,9 +13,11 @@
 #include <windows.h>
 #endif
 
-SavePromptDialog::SavePromptDialog(QWidget *parent)
+SavePromptDialog::SavePromptDialog(QWidget *parent, const QString &title, const QString &message)
     : QDialog(parent)
     , m_result(Result::Cancel)
+    , m_customTitle(title)
+    , m_customMessage(message)
 {
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
     setAttribute(Qt::WA_TranslucentBackground);
@@ -90,7 +92,8 @@ void SavePromptDialog::setupUi()
     spacerLeft->setFixedSize(28, 28);
     headerLayout->addWidget(spacerLeft);
 
-    auto *titleLabel = new QLabel(QStringLiteral("Несохраненные изменения"), container);
+    QString displayTitle = m_customTitle.isEmpty() ? QStringLiteral("Несохраненные изменения") : m_customTitle;
+    auto *titleLabel = new QLabel(displayTitle, container);
     titleLabel->setAlignment(Qt::AlignCenter);
     titleLabel->setStyleSheet(Theme::dialogTitleStyle());
     headerLayout->addWidget(titleLabel, 1);
@@ -108,7 +111,7 @@ void SavePromptDialog::setupUi()
     innerLayout->addLayout(headerLayout);
 
     auto *descLabel = new QLabel(
-        QStringLiteral("В карте есть несохраненные изменения.\nСохранить перед выходом в хаб редактора?"),
+        m_customMessage.isEmpty() ? QStringLiteral("В карте есть несохраненные изменения.\nСохранить перед выходом в хаб редактора?") : m_customMessage,
         container
     );
     descLabel->setAlignment(Qt::AlignCenter);

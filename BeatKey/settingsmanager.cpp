@@ -2,6 +2,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QDebug>
+#include <QHash>
 #include <algorithm>
 
 SettingsManager& SettingsManager::instance()
@@ -243,4 +244,109 @@ Qt::Key SettingsManager::stringToKey(const QString &str)
     if (ok) return static_cast<Qt::Key>(code);
 
     return Qt::Key_unknown;
+}
+
+Qt::Key SettingsManager::normalizeKey(const QKeyEvent *event)
+{
+    if (!event) {
+        return Qt::Key_unknown;
+    }
+
+    // 1. Аппаратный код клавиши (Windows Virtual Key Code) не зависит от раскладки
+    quint32 vk = event->nativeVirtualKey();
+    if (vk >= 0x41 && vk <= 0x5A) { // 'A' .. 'Z'
+        return static_cast<Qt::Key>(vk);
+    }
+    if (vk >= 0x30 && vk <= 0x39) { // '0' .. '9'
+        return static_cast<Qt::Key>(vk);
+    }
+    if (vk == 0x20) { // VK_SPACE
+        return Qt::Key_Space;
+    }
+    if (vk == 0x1B) { // VK_ESCAPE
+        return Qt::Key_Escape;
+    }
+    if (vk == 0x0D) { // VK_RETURN
+        return Qt::Key_Return;
+    }
+    if (vk == 0x08) { // VK_BACK
+        return Qt::Key_Backspace;
+    }
+    if (vk == 0x2E) { // VK_DELETE
+        return Qt::Key_Delete;
+    }
+    if (vk == 0x25) { // VK_LEFT
+        return Qt::Key_Left;
+    }
+    if (vk == 0x26) { // VK_UP
+        return Qt::Key_Up;
+    }
+    if (vk == 0x27) { // VK_RIGHT
+        return Qt::Key_Right;
+    }
+    if (vk == 0x28) { // VK_DOWN
+        return Qt::Key_Down;
+    }
+
+    // 2. Таблица прямого сопоставления кириллических символов стандартной клавиатуры
+    int k = event->key();
+    QString text = event->text();
+    QChar ch = text.isEmpty() ? QChar(static_cast<ushort>(k)) : text.at(0);
+
+    static const QHash<QChar, Qt::Key> cyrillicMap = {
+        {QChar(u'й'), Qt::Key_Q}, {QChar(u'Й'), Qt::Key_Q},
+        {QChar(u'ц'), Qt::Key_W}, {QChar(u'Ц'), Qt::Key_W},
+        {QChar(u'у'), Qt::Key_E}, {QChar(u'У'), Qt::Key_E},
+        {QChar(u'к'), Qt::Key_R}, {QChar(u'К'), Qt::Key_R},
+        {QChar(u'е'), Qt::Key_T}, {QChar(u'Е'), Qt::Key_T},
+        {QChar(u'н'), Qt::Key_Y}, {QChar(u'Н'), Qt::Key_Y},
+        {QChar(u'г'), Qt::Key_U}, {QChar(u'Г'), Qt::Key_U},
+        {QChar(u'ш'), Qt::Key_I}, {QChar(u'Ш'), Qt::Key_I},
+        {QChar(u'щ'), Qt::Key_O}, {QChar(u'Щ'), Qt::Key_O},
+        {QChar(u'з'), Qt::Key_P}, {QChar(u'З'), Qt::Key_P},
+        {QChar(u'х'), Qt::Key_BracketLeft}, {QChar(u'Х'), Qt::Key_BracketLeft},
+        {QChar(u'ъ'), Qt::Key_BracketRight}, {QChar(u'Ъ'), Qt::Key_BracketRight},
+        {QChar(u'ф'), Qt::Key_A}, {QChar(u'Ф'), Qt::Key_A},
+        {QChar(u'ы'), Qt::Key_S}, {QChar(u'Ы'), Qt::Key_S},
+        {QChar(u'в'), Qt::Key_D}, {QChar(u'В'), Qt::Key_D},
+        {QChar(u'а'), Qt::Key_F}, {QChar(u'А'), Qt::Key_F},
+        {QChar(u'п'), Qt::Key_G}, {QChar(u'П'), Qt::Key_G},
+        {QChar(u'р'), Qt::Key_H}, {QChar(u'Р'), Qt::Key_H},
+        {QChar(u'о'), Qt::Key_J}, {QChar(u'О'), Qt::Key_J},
+        {QChar(u'л'), Qt::Key_K}, {QChar(u'Л'), Qt::Key_K},
+        {QChar(u'д'), Qt::Key_L}, {QChar(u'Д'), Qt::Key_L},
+        {QChar(u'ж'), Qt::Key_Semicolon}, {QChar(u'Ж'), Qt::Key_Semicolon},
+        {QChar(u'э'), Qt::Key_Apostrophe}, {QChar(u'Э'), Qt::Key_Apostrophe},
+        {QChar(u'я'), Qt::Key_Z}, {QChar(u'Я'), Qt::Key_Z},
+        {QChar(u'ч'), Qt::Key_X}, {QChar(u'Ч'), Qt::Key_X},
+        {QChar(u'с'), Qt::Key_C}, {QChar(u'С'), Qt::Key_C},
+        {QChar(u'м'), Qt::Key_V}, {QChar(u'М'), Qt::Key_V},
+        {QChar(u'и'), Qt::Key_B}, {QChar(u'И'), Qt::Key_B},
+        {QChar(u'т'), Qt::Key_N}, {QChar(u'Т'), Qt::Key_N},
+        {QChar(u'ь'), Qt::Key_M}, {QChar(u'Ь'), Qt::Key_M},
+        {QChar(u'б'), Qt::Key_Comma}, {QChar(u'Б'), Qt::Key_Comma},
+        {QChar(u'ю'), Qt::Key_Period}, {QChar(u'Ю'), Qt::Key_Period},
+        {QChar(u'ё'), Qt::Key_QuoteLeft}, {QChar(u'Ё'), Qt::Key_QuoteLeft}
+    };
+
+    if (cyrillicMap.contains(ch)) {
+        return cyrillicMap.value(ch);
+    }
+
+    // 3. Стандартная клавиша Qt
+    return static_cast<Qt::Key>(k);
+}
+
+bool SettingsManager::isKeyMatching(const QKeyEvent *event, Qt::Key expectedKey)
+{
+    if (!event) {
+        return false;
+    }
+    if (normalizeKey(event) == expectedKey) {
+        return true;
+    }
+    if (static_cast<Qt::Key>(event->key()) == expectedKey) {
+        return true;
+    }
+    return false;
 }

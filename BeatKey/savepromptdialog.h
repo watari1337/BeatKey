@@ -17,7 +17,9 @@ public:
         Cancel
     };
 
-    explicit SavePromptDialog(QWidget *parent = nullptr);
+    explicit SavePromptDialog(QWidget *parent = nullptr,
+                              const QString &title = QString(),
+                              const QString &message = QString());
     ~SavePromptDialog() override = default;
 
     Result promptResult() const { return m_result; }
@@ -30,6 +32,8 @@ private:
     void setupUi();
 
     Result m_result;
+    QString m_customTitle;
+    QString m_customMessage;
 };
 
 #endif // SAVEPROMPTDIALOG_H

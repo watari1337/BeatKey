@@ -26,7 +26,10 @@ SOURCES += \
     editortimelinecanvas.cpp \
     beatmapeditorwidget.cpp \
     savepromptdialog.cpp \
-    covermanager.cpp
+    covermanager.cpp \
+    gameplaywidget.cpp \
+    resultswidget.cpp \
+    calibrationdialog.cpp
 
 HEADERS += \
     mainwindow.h \
@@ -50,7 +53,11 @@ HEADERS += \
     editortimelinecanvas.h \
     beatmapeditorwidget.h \
     savepromptdialog.h \
-    covermanager.h
+    covermanager.h \
+    gameresult.h \
+    gameplaywidget.h \
+    resultswidget.h \
+    calibrationdialog.h
 
 RESOURCES += \
     resources.qrc

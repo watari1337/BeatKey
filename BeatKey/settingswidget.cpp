@@ -2,6 +2,7 @@
 #include "settingsmanager.h"
 #include "theme.h"
 #include "audiomanager.h"
+#include "calibrationdialog.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -74,7 +75,7 @@ void KeyBindButton::keyPressEvent(QKeyEvent *event)
         return;
     }
 
-    m_key = static_cast<Qt::Key>(k);
+    m_key = SettingsManager::normalizeKey(event);
     m_isListening = false;
     updateButtonText();
     emit keyChanged(m_key);
@@ -526,15 +527,23 @@ void SettingsWidget::resetDefaults()
 void SettingsWidget::startAutoCalibration()
 {
     // Воспроизводим тестовый щелчок метронома
-    AudioManager::instance().playMetronomeSound();
+    CalibrationDialog dialog(this);
+    if (dialog.exec() == QDialog::Accepted) {
+        if (m_offsetSpinBox) {
+            const QSignalBlocker blocker(m_offsetSpinBox);
+            m_offsetSpinBox->setValue(SettingsManager::instance().audioOffsetMs());
+        }
+    }
+    return;
 
     // Stub per TZ for interactive 10-tap calibration
+    /*
     QMessageBox::information(this, QStringLiteral("Автокалибровка задержки"),
                              QStringLiteral("Режим автокалибровки:\n\n"
                                             "При запуске проигрывается 10 ритмичных кликов метронома.\n"
                                             "Игрок нажимает основную клавишу в такт каждому клику.\n"
                                             "Система рассчитывает среднее отклонение (в миллисекундах) "
-                                            "и автоматически выставляет компенсирующее значение Audio Offset."));
+                                            "и автоматически выставляет компенсирующее значение Audio Offset.")); */
 }
 
 // ============================================================================

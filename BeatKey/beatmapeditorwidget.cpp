@@ -2394,7 +2394,48 @@ void BeatmapEditorWidget::handleExportBkey()
 void BeatmapEditorWidget::keyPressEvent(QKeyEvent *event)
 {
     // Ctrl+S quick save
-    if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_S) {
+    Qt::Key normKey = SettingsManager::normalizeKey(event);
+    if ((event->modifiers() & Qt::ControlModifier)) {
+        if (normKey == Qt::Key_S || event->key() == Qt::Key_S) {
+            handleSaveMap();
+            event->accept();
+            return;
+        } else if (normKey == Qt::Key_Z) {
+            if (event->modifiers() & Qt::ShiftModifier) {
+                handleRedo();
+            } else {
+                handleUndo();
+            }
+            event->accept();
+            return;
+        } else if (normKey == Qt::Key_Y) {
+            handleRedo();
+            event->accept();
+            return;
+        } else if (normKey == Qt::Key_A) {
+            m_timelineCanvas->selectAll();
+            event->accept();
+            return;
+        }
+    }
+
+    if (event->modifiers() == Qt::NoModifier) {
+        if (normKey == Qt::Key_1) {
+            if (m_selectToolBtn) m_selectToolBtn->click();
+            event->accept();
+            return;
+        } else if (normKey == Qt::Key_2) {
+            if (m_placeToolBtn) m_placeToolBtn->click();
+            event->accept();
+            return;
+        } else if (normKey == Qt::Key_Space) {
+            handlePlayPauseToggle();
+            event->accept();
+            return;
+        }
+    }
+
+    if (false) {
         handleSaveMap();
         event->accept();
         return;
@@ -2405,8 +2446,8 @@ void BeatmapEditorWidget::keyPressEvent(QKeyEvent *event)
         Qt::Key k1 = SettingsManager::instance().primaryKey();
         Qt::Key k2 = SettingsManager::instance().secondaryKey();
 
-        if (event->key() == k1 ||
-            event->key() == k2) {
+        if (SettingsManager::isKeyMatching(event, k1) ||
+            SettingsManager::isKeyMatching(event, k2)) {
 
             int currentAudioMs = static_cast<int>(m_mediaPlayer->position());
             int snappedMs = m_timelineCanvas->snapTime(currentAudioMs);
