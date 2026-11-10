@@ -3,6 +3,7 @@
 #include "audiomanager.h"
 #include "settingsmanager.h"
 #include "leaderboardmanager.h"
+#include "covermanager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -344,8 +345,13 @@ void ResultsWidget::paintEvent(QPaintEvent *event)
     Q_UNUSED(event);
     QPainter painter(this);
 
-    if (!m_result.beatmap.coverImage.isNull()) {
-        QPixmap scaled = m_result.beatmap.coverImage.scaled(size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    QPixmap cover = m_result.beatmap.coverImage;
+    if (cover.isNull()) {
+        cover = CoverManager::standardCoverPixmap(CoverManager::StandardCover::Standard2);
+    }
+
+    if (!cover.isNull() && !size().isEmpty() && width() > 0 && height() > 0) {
+        QPixmap scaled = cover.scaled(size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
         int cropX = (scaled.width() - width()) / 2;
         int cropY = (scaled.height() - height()) / 2;
         painter.drawPixmap(0, 0, scaled, cropX, cropY, width(), height());

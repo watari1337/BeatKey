@@ -135,6 +135,7 @@ private:
 
     // Спрайт ноты из ресурсов
     QPixmap m_notePixmap;
+    QPixmap m_scaledNotePixmap;
 
     // Визуальные настройки фона
     int m_bgDimPercent = 50;
@@ -165,6 +166,9 @@ private:
     QTimer *m_gameLoopTimer;
     QTimer *m_countdownTimer = nullptr;
     QElapsedTimer m_audioElapsedTimer;
+    mutable QElapsedTimer m_audioClock;
+    mutable qint64 m_clockBaseMs = 0;
+    mutable qint64 m_lastMediaPos = -1;
     qint64 m_pausedElapsedMs = 0;
 
     // Геометрия игрового поля

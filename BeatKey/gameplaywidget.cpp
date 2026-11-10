@@ -1,6 +1,7 @@
 #include "gameplaywidget.h"
 #include "settingsmanager.h"
 #include "audiomanager.h"
+#include "covermanager.h"
 #include "theme.h"
 
 #include <QPainter>
@@ -256,10 +257,14 @@ GameplayWidget::GameplayWidget(QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
     setAttribute(Qt::WA_OpaquePaintEvent, false);
 
-    // Загрузка спрайта ноты из ресурсов
+    // Загрузка спрайта ноты из ресурсов и предварительное масштабирование для плавной отрисовки
     m_notePixmap = QPixmap(QStringLiteral(":/assets/images/game_note.png"));
+    if (!m_notePixmap.isNull()) {
+        m_scaledNotePixmap = m_notePixmap.scaled(56, 36, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    }
 
-    m_gameLoopTimer->setInterval(16); // ~60 FPS
+    m_gameLoopTimer->setTimerType(Qt::PreciseTimer);
+    m_gameLoopTimer->setInterval(16); // ~60 FPS с высокоточным таймером
     connect(m_gameLoopTimer, &QTimer::timeout, this, &GameplayWidget::onGameTick);
 
     connect(m_countdownTimer, &QTimer::timeout, this, &GameplayWidget::onCountdownTick);
@@ -273,6 +278,11 @@ GameplayWidget::~GameplayWidget()
 void GameplayWidget::startMap(const Beatmap &beatmap)
 {
     stopGame();
+
+    if (beatmap.notes.isEmpty() || beatmap.totalNotes() == 0) {
+        emit exitRequested();
+        return;
+    }
 
     m_beatmap = beatmap;
     m_notes.clear();
@@ -304,6 +314,10 @@ void GameplayWidget::startMap(const Beatmap &beatmap)
     m_isPaused = false;
     m_floatingJudgments.clear();
 
+    m_clockBaseMs = 0;
+    m_lastMediaPos = -1;
+    m_pausedElapsedMs = 0;
+
     updateTrackGeometry();
     updateCachedBackground();
 
@@ -333,6 +347,9 @@ void GameplayWidget::resumeGame()
 
     m_isPaused = false;
     m_audioElapsedTimer.restart();
+    m_audioClock.restart();
+    m_clockBaseMs = AudioManager::instance().currentPositionMs();
+    m_lastMediaPos = m_clockBaseMs;
     AudioManager::instance().resumeMusic();
     m_gameLoopTimer->start();
     update();
@@ -348,6 +365,9 @@ void GameplayWidget::stopGame()
     m_isFinished = true;
     m_isPaused = false;
     m_isStartingCountdown = false;
+    m_clockBaseMs = 0;
+    m_lastMediaPos = -1;
+    m_pausedElapsedMs = 0;
 }
 
 qint64 GameplayWidget::currentTrackTimeMs() const
@@ -355,15 +375,27 @@ qint64 GameplayWidget::currentTrackTimeMs() const
     if (m_isStartingCountdown) {
         return 0;
     }
-    if (!m_audioElapsedTimer.isValid()) return 0;
-
-    qint64 audioPos = AudioManager::instance().syncedPositionMs();
-    qint64 elapsedMs = m_pausedElapsedMs + (m_isPaused ? 0 : m_audioElapsedTimer.elapsed());
-
-    if (audioPos > 0) {
-        return audioPos;
+    if (m_isPaused) {
+        return m_pausedElapsedMs;
     }
-    return elapsedMs;
+
+    int offset = SettingsManager::instance().audioOffsetMs();
+
+    if (AudioManager::instance().isMusicPlaying()) {
+        qint64 curPos = AudioManager::instance().currentPositionMs();
+        if (curPos != m_lastMediaPos) {
+            m_lastMediaPos = curPos;
+            m_clockBaseMs = curPos;
+            m_audioClock.restart();
+        }
+        qint64 elapsedSinceMediaUpdate = m_audioClock.isValid() ? m_audioClock.elapsed() : 0;
+        return (m_clockBaseMs + elapsedSinceMediaUpdate) - offset;
+    }
+
+    if (m_audioElapsedTimer.isValid()) {
+        return (m_pausedElapsedMs + m_audioElapsedTimer.elapsed()) - offset;
+    }
+    return 0;
 }
 
 void GameplayWidget::resizeEvent(QResizeEvent *event)
@@ -385,12 +417,16 @@ void GameplayWidget::updateTrackGeometry()
 
 void GameplayWidget::updateCachedBackground()
 {
-    if (m_beatmap.coverImage.isNull()) {
+    QPixmap bgPixmap = m_beatmap.coverImage;
+    if (bgPixmap.isNull()) {
+        bgPixmap = CoverManager::standardCoverPixmap(CoverManager::StandardCover::Standard2);
+    }
+    if (bgPixmap.isNull() || size().isEmpty() || width() <= 0 || height() <= 0) {
         m_cachedBackgroundPixmap = QPixmap();
         return;
     }
 
-    QPixmap scaled = m_beatmap.coverImage.scaled(size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    QPixmap scaled = bgPixmap.scaled(size(), Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
     int cropX = (scaled.width() - width()) / 2;
     int cropY = (scaled.height() - height()) / 2;
     QImage img = scaled.copy(cropX, cropY, width(), height()).toImage();
@@ -443,7 +479,8 @@ NoteRenderObject GameplayWidget::getNoteRenderObject(const NoteData &note,
         return obj;
     }
 
-    qreal pixelsPerMs = (trackRect.width() - hitLineX) / m_travelTimeMs;
+    qreal distance = trackRect.right() - hitLineX;
+    qreal pixelsPerMs = distance / m_travelTimeMs;
     qreal x = hitLineX + (diffMs * pixelsPerMs);
 
     const qreal noteWidth = 56.0;
@@ -453,7 +490,7 @@ NoteRenderObject GameplayWidget::getNoteRenderObject(const NoteData &note,
                       trackRect.center().y() - noteHeight / 2.0,
                       noteWidth,
                       noteHeight);
-    obj.pixmap = m_notePixmap;
+    obj.pixmap = m_scaledNotePixmap.isNull() ? m_notePixmap : m_scaledNotePixmap;
     obj.isVisible = true;
     obj.opacity = 1.0;
     return obj;
@@ -566,9 +603,20 @@ void GameplayWidget::handleHitAction()
             finishGame(true);
         }
     } else {
-        // Удар в пустоту (Ghost tap)
+        // Удар в пустоту / нажатие без ноты в зоне удара - штраф (ПРОМАХ)
+        m_countMiss++;
+        if (m_combo >= 5) {
+            AudioManager::instance().playComboBreakSound();
+        }
+        m_combo = 0;
+        m_hp = qBound(0, m_hp - 6, 100);
+        spawnFloatingJudgment(QStringLiteral("ПРОМАХ"), Theme::Colors::Danger);
         AudioManager::instance().playMissSound();
         m_keyPressGlow = 0.5;
+
+        if (m_hp <= 0) {
+            finishGame(true);
+        }
     }
 }
 
@@ -736,6 +784,9 @@ void GameplayWidget::onCountdownTick()
                 AudioManager::instance().playTrack(m_beatmap.extractedAudioPath, false);
             }
             m_audioElapsedTimer.restart();
+            m_audioClock.restart();
+            m_clockBaseMs = 0;
+            m_lastMediaPos = -1;
             m_pausedElapsedMs = 0;
         } else {
             resumeGame();
@@ -750,7 +801,8 @@ void GameplayWidget::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
     QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
 
     // 1. Отрисовка фона с кинематографическими настройками (Затемнение, Размытие, Обесцвечивание, Виньетка)
     if (!m_cachedBackgroundPixmap.isNull()) {
@@ -821,7 +873,7 @@ void GameplayWidget::paintEvent(QPaintEvent *event)
         if (!obj.isVisible) continue;
 
         if (!obj.pixmap.isNull()) {
-            painter.drawPixmap(obj.rect.toRect(), obj.pixmap);
+            painter.drawPixmap(obj.rect.topLeft(), obj.pixmap);
         } else {
             painter.setBrush(QColor(0, 229, 255));
             painter.setPen(QPen(QColor(255, 255, 255), 2.0));

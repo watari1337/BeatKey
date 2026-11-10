@@ -10,6 +10,7 @@
 #include "settingsmanager.h"
 #include "audiomanager.h"
 #include "theme.h"
+#include "covermanager.h"
 
 #include <QVBoxLayout>
 #include <QLabel>
@@ -89,6 +90,14 @@ void MainWindow::setupUi()
         switchToScreen(Screen_MainMenu);
     });
     connect(m_songSelectWidget, &SongSelectWidget::playMapRequested, this, [this](const Beatmap &map) {
+        if (map.notes.isEmpty() || map.totalNotes() == 0) {
+            CoverManager::showMediaErrorDialog(
+                this,
+                QStringLiteral("Карта пуста"),
+                QStringLiteral("В этой карте нет нот для игры.\nДобавьте ноты в редакторе карт перед началом игры.")
+            );
+            return;
+        }
         m_gameplayWidget->startMap(map);
         switchToScreen(Screen_Gameplay);
     });
@@ -104,6 +113,15 @@ void MainWindow::setupUi()
 
     // Results navigation
     connect(m_resultsWidget, &ResultsWidget::retryRequested, this, [this](const Beatmap &map) {
+        if (map.notes.isEmpty() || map.totalNotes() == 0) {
+            CoverManager::showMediaErrorDialog(
+                this,
+                QStringLiteral("Карта пуста"),
+                QStringLiteral("В этой карте нет нот для игры.\nДобавьте ноты в редакторе карт перед началом игры.")
+            );
+            switchToScreen(Screen_SongSelect);
+            return;
+        }
         m_gameplayWidget->startMap(map);
         switchToScreen(Screen_Gameplay);
     });

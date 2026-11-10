@@ -276,7 +276,16 @@ void SongSelectWidget::setupUi()
         AudioManager::instance().playClickSound();
         int row = m_songListWidget->currentRow();
         if (row >= 0 && row < m_loadedBeatmaps.size()) {
-            emit playMapRequested(m_loadedBeatmaps[row]);
+            const Beatmap &map = m_loadedBeatmaps[row];
+            if (map.notes.isEmpty() || map.totalNotes() == 0) {
+                CoverManager::showMediaErrorDialog(
+                    this,
+                    QStringLiteral("Карта пуста"),
+                    QStringLiteral("В этой карте нет нот для игры.\nДобавьте ноты в редакторе карт перед началом игры.")
+                );
+                return;
+            }
+            emit playMapRequested(map);
         }
     });
 
