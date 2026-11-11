@@ -44,6 +44,7 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     , m_playbackTimer(new QTimer(this))
     , m_waveform(new AudioWaveform(this))
     , m_clockBaseMs(0)
+    , m_lastReportedPlaybackMs(0.0)
     , m_lastMediaPos(-1)
     , m_isMetadataModified(false)
     , m_isTapRecording(false)
@@ -55,14 +56,6 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     , m_editorStack(nullptr)
     , m_descCoverPreview(nullptr)
     , m_descAudioPathLabel(nullptr)
-    , m_descBgDimSlider(nullptr)
-    , m_descBgDimValLabel(nullptr)
-    , m_descBgBlurSlider(nullptr)
-    , m_descBgBlurValLabel(nullptr)
-    , m_descBgDesatSlider(nullptr)
-    , m_descBgDesatValLabel(nullptr)
-    , m_descBgVignetteSlider(nullptr)
-    , m_descBgVignetteValLabel(nullptr)
     , m_headerContainer(nullptr)
     , m_editorToolbar(nullptr)
     , m_topScrollArea(nullptr)
@@ -104,6 +97,10 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     , m_metaAudioLabel(nullptr)
     , m_quantPresetCombo(nullptr)
     , m_quantCustomSpin(nullptr)
+    , m_sideBpmSpin(nullptr)
+    , m_sideOffsetSpin(nullptr)
+    , m_sideDurationSpin(nullptr)
+    , m_sideAutoDurationBtn(nullptr)
     , m_selCountLabel(nullptr)
     , m_selTimeLabel(nullptr)
     , m_selDeleteBtn(nullptr)
@@ -117,6 +114,7 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     m_mediaPlayer->setAudioOutput(m_audioOutput);
     m_audioOutput->setVolume(SettingsManager::instance().musicVolume() / 100.0f);
 
+    m_playbackTimer->setTimerType(Qt::PreciseTimer);
     connect(m_playbackTimer, &QTimer::timeout, this, &BeatmapEditorWidget::updatePlaybackTick);
 
     connect(m_mediaPlayer, &QMediaPlayer::durationChanged, this, [this](qint64 d) {
@@ -139,9 +137,11 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     });
 
     connect(m_mediaPlayer, &QMediaPlayer::positionChanged, this, [this](qint64 pos) {
-        int currentMs = static_cast<int>(pos);
-        m_timelineCanvas->setCurrentTime(currentMs);
-        updateTimeDisplay(currentMs);
+        if (m_mediaPlayer->playbackState() != QMediaPlayer::PlayingState) {
+            int currentMs = static_cast<int>(pos);
+            m_timelineCanvas->setCurrentTime(currentMs);
+            updateTimeDisplay(currentMs);
+        }
     });
 
     connect(m_mediaPlayer, &QMediaPlayer::playbackStateChanged, this, [this](QMediaPlayer::PlaybackState state) {
@@ -150,7 +150,8 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
             m_audioClock.restart();
             m_clockBaseMs = m_mediaPlayer->position();
             m_lastMediaPos = m_clockBaseMs;
-            m_playbackTimer->start(16);
+            m_lastReportedPlaybackMs = static_cast<double>(m_clockBaseMs);
+            m_playbackTimer->start(1);
         } else {
             m_playBtn->setText(QStringLiteral("▶"));
             m_playbackTimer->stop();
@@ -172,6 +173,14 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
 
     setupUi();
     setupShortcuts();
+
+    connect(&SettingsManager::instance(), &SettingsManager::bgDimPercentChanged, this, [this](int) {
+        update();
+    });
+    connect(&SettingsManager::instance(), &SettingsManager::bgBlurRadiusChanged, this, [this](int) {
+        updateCachedBackground();
+        update();
+    });
 
     // Install application-wide or widget-wide event filter for reliable Space capture
     qApp->installEventFilter(this);
@@ -231,8 +240,9 @@ void BeatmapEditorWidget::updateCachedBackground()
     QImage img = scaled.copy(cropX, cropY, width(), height()).toImage();
 
     // Cinematic Blur: Fast Box-Filter Downsample & Upsample
-    if (m_backgroundBlurRadius > 0) {
-        int downFactor = 1 + (m_backgroundBlurRadius * 2);
+    int blurRadius = SettingsManager::instance().bgBlurRadius();
+    if (blurRadius > 0) {
+        int downFactor = 1 + (blurRadius * 2);
         int dw = qMax(16, width() / downFactor);
         int dh = qMax(16, height() / downFactor);
         QImage small = img.scaled(dw, dh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
@@ -278,7 +288,7 @@ void BeatmapEditorWidget::paintEvent(QPaintEvent *event)
         painter.drawPixmap(0, 0, m_cachedBackgroundPixmap);
 
         // 1. Dark dimming overlay based on configurable background dim percent
-        int dimAlpha = qBound(0, static_cast<int>(m_backgroundDimPercent * 2.55), 255);
+        int dimAlpha = qBound(0, static_cast<int>(SettingsManager::instance().bgDimPercent() * 2.55), 255);
         if (dimAlpha > 0) {
             painter.fillRect(rect(), QColor(16, 10, 28, dimAlpha));
         }
@@ -612,10 +622,11 @@ void BeatmapEditorWidget::setupUi()
     controlsRow->addWidget(m_stopBtn);
 
     m_speedCombo = new QComboBox(toolbarScrollContent);
-    m_speedCombo->addItem(QStringLiteral("0.5x"), 0.5);
+    m_speedCombo->addItem(QStringLiteral("0.25x"), 0.25);
+    m_speedCombo->addItem(QStringLiteral("0.5x"), 0.50);
     m_speedCombo->addItem(QStringLiteral("0.75x"), 0.75);
-    m_speedCombo->addItem(QStringLiteral("1.0x"), 1.0);
-    m_speedCombo->setCurrentIndex(2);
+    m_speedCombo->addItem(QStringLiteral("1.0x"), 1.00);
+    m_speedCombo->setCurrentIndex(3);
     m_speedCombo->setFocusPolicy(Qt::NoFocus);
     m_speedCombo->setCursor(Qt::PointingHandCursor);
     m_speedCombo->setFixedSize(68, 32);
@@ -850,7 +861,90 @@ QWidget* BeatmapEditorWidget::createEditorPage()
     ));
     rightLayout->addWidget(propTitle);
 
-    // Section 1: Quantization Grid
+    // Секция 1: Параметры трека (BPM, Offset, Длительность + Авто)
+    auto *timingSec = new QLabel(QStringLiteral("ПАРАМЕТРЫ ТРЕКА"), scrollContent);
+    timingSec->setStyleSheet(Theme::cardHeaderStyle());
+    rightLayout->addWidget(timingSec);
+
+    auto *tempoRow = new QHBoxLayout();
+    tempoRow->setSpacing(8);
+
+    auto *bpmCol = new QVBoxLayout();
+    bpmCol->setSpacing(3);
+    auto *bpmLbl = new QLabel(QStringLiteral("Темп (BPM):"), scrollContent);
+    bpmLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    m_sideBpmSpin = new QDoubleSpinBox(scrollContent);
+    m_sideBpmSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_sideBpmSpin->setRange(30.0, 300.0);
+    m_sideBpmSpin->setValue(120.0);
+    m_sideBpmSpin->setSingleStep(1.0);
+    m_sideBpmSpin->setAlignment(Qt::AlignCenter);
+    m_sideBpmSpin->setStyleSheet(Theme::spinBoxStyle());
+    connect(m_sideBpmSpin, &QDoubleSpinBox::valueChanged, this, &BeatmapEditorWidget::handleBpmChanged);
+    bpmCol->addWidget(bpmLbl);
+    bpmCol->addWidget(m_sideBpmSpin);
+    tempoRow->addLayout(bpmCol, 1);
+
+    auto *offsetCol = new QVBoxLayout();
+    offsetCol->setSpacing(3);
+    auto *offsetLbl = new QLabel(QStringLiteral("Смещение (Offset, мс):"), scrollContent);
+    offsetLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    m_sideOffsetSpin = new QSpinBox(scrollContent);
+    m_sideOffsetSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_sideOffsetSpin->setRange(-5000, 5000);
+    m_sideOffsetSpin->setValue(0);
+    m_sideOffsetSpin->setAlignment(Qt::AlignCenter);
+    m_sideOffsetSpin->setStyleSheet(Theme::spinBoxStyle());
+    connect(m_sideOffsetSpin, &QSpinBox::valueChanged, this, &BeatmapEditorWidget::handleOffsetChanged);
+    offsetCol->addWidget(offsetLbl);
+    offsetCol->addWidget(m_sideOffsetSpin);
+    tempoRow->addLayout(offsetCol, 1);
+
+    rightLayout->addLayout(tempoRow);
+
+    auto *durCol = new QVBoxLayout();
+    durCol->setSpacing(3);
+    auto *timingDurLbl = new QLabel(QStringLiteral("Длительность карты (сек):"), scrollContent);
+    timingDurLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    durCol->addWidget(timingDurLbl);
+
+    auto *durControlRow = new QHBoxLayout();
+    durControlRow->setSpacing(8);
+
+    m_sideDurationSpin = new QSpinBox(scrollContent);
+    m_sideDurationSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_sideDurationSpin->setRange(5, 3600);
+    m_sideDurationSpin->setValue(m_totalDurationMs / 1000);
+    m_sideDurationSpin->setAlignment(Qt::AlignCenter);
+    m_sideDurationSpin->setStyleSheet(Theme::spinBoxStyle());
+    m_sideDurationSpin->setToolTip(QStringLiteral("Общая длительность карты. Автоматически рассчитывается по треку и нотам, но может быть изменена вручную."));
+    connect(m_sideDurationSpin, &QSpinBox::editingFinished, this, [this]() {
+        m_isDurationManuallyEdited = true;
+        setMapDuration(m_sideDurationSpin->value() * 1000);
+    });
+    durControlRow->addWidget(m_sideDurationSpin, 1);
+
+    m_sideAutoDurationBtn = new QPushButton(QStringLiteral("Авто"), scrollContent);
+    m_sideAutoDurationBtn->setFocusPolicy(Qt::NoFocus);
+    m_sideAutoDurationBtn->setCursor(Qt::PointingHandCursor);
+    m_sideAutoDurationBtn->setStyleSheet(Theme::secondaryButtonStyle());
+    m_sideAutoDurationBtn->setMinimumSize(60, 30);
+    m_sideAutoDurationBtn->setToolTip(QStringLiteral("Автоматически рассчитать длительность по аудиофайлу и последней ноте"));
+    connect(m_sideAutoDurationBtn, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        recalculateMapDuration(m_audioDurationMs);
+    });
+    durControlRow->addWidget(m_sideAutoDurationBtn);
+
+    durCol->addLayout(durControlRow);
+    rightLayout->addLayout(durCol);
+
+    auto *sepTiming = new QFrame(scrollContent);
+    sepTiming->setFrameShape(QFrame::HLine);
+    sepTiming->setStyleSheet(QStringLiteral("background: #5a388f; max-height: 1px;"));
+    rightLayout->addWidget(sepTiming);
+
+    // Секция 2: Сетка квантования
     auto *quantSec = new QLabel(QStringLiteral("СЕТКА КВАНТОВАНИЯ"), scrollContent);
     quantSec->setStyleSheet(Theme::cardHeaderStyle());
     rightLayout->addWidget(quantSec);
@@ -1052,95 +1146,6 @@ QWidget* BeatmapEditorWidget::createDescriptionPage()
     m_descAudioPathLabel->setStyleSheet(Theme::secondaryLabelStyle());
     m_descAudioPathLabel->setWordWrap(true);
     leftLayout->addWidget(m_descAudioPathLabel);
-
-    auto *dimSep = new QFrame(leftCard);
-    dimSep->setFrameShape(QFrame::HLine);
-    dimSep->setStyleSheet(QStringLiteral("background: #5a388f; max-height: 1px;"));
-    leftLayout->addWidget(dimSep);
-
-    auto *visualHeading = new QLabel(QStringLiteral("ВИЗУАЛЬНЫЕ НАСТРОЙКИ ФОНА"), leftCard);
-    visualHeading->setStyleSheet(Theme::cardHeaderStyle());
-    leftLayout->addWidget(visualHeading);
-
-    // 1. Background Dim Slider
-    auto *dimLbl = new QLabel(QStringLiteral("Затемнение фона (0% - 100%):"), leftCard);
-    dimLbl->setStyleSheet(Theme::secondaryLabelStyle());
-    leftLayout->addWidget(dimLbl);
-
-    auto *dimRow = new QHBoxLayout();
-    m_descBgDimSlider = new ClickableSlider(Qt::Horizontal, leftCard);
-    m_descBgDimSlider->setRange(0, 100);
-    m_descBgDimSlider->setValue(m_backgroundDimPercent);
-    m_descBgDimSlider->setStyleSheet(Theme::sliderStyle());
-    m_descBgDimSlider->setToolTip(QStringLiteral("0% — яркий оригинальный фон, 100% — полностью черный фон"));
-    connect(m_descBgDimSlider, &QSlider::valueChanged, this, &BeatmapEditorWidget::handleBgDimSliderChanged);
-
-    m_descBgDimValLabel = new QLabel(QStringLiteral("%1%").arg(m_backgroundDimPercent), leftCard);
-    m_descBgDimValLabel->setStyleSheet(QStringLiteral("color: #bb9af7; font-weight: bold; min-width: 42px; background: transparent; border: none;"));
-    m_descBgDimValLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    dimRow->addWidget(m_descBgDimSlider, 1);
-    dimRow->addWidget(m_descBgDimValLabel);
-    leftLayout->addLayout(dimRow);
-
-    // 2. Background Blur Slider
-    auto *blurLbl = new QLabel(QStringLiteral("Размытие фона (0 - 20 px):"), leftCard);
-    blurLbl->setStyleSheet(Theme::secondaryLabelStyle());
-    leftLayout->addWidget(blurLbl);
-
-    auto *blurRow = new QHBoxLayout();
-    m_descBgBlurSlider = new ClickableSlider(Qt::Horizontal, leftCard);
-    m_descBgBlurSlider->setRange(0, 20);
-    m_descBgBlurSlider->setValue(m_backgroundBlurRadius);
-    m_descBgBlurSlider->setStyleSheet(Theme::sliderStyle());
-    m_descBgBlurSlider->setToolTip(QStringLiteral("Размывает мелкие детали обложки для максимальной читаемости нот и звуковой волны"));
-    connect(m_descBgBlurSlider, &QSlider::valueChanged, this, &BeatmapEditorWidget::handleBgBlurSliderChanged);
-
-    m_descBgBlurValLabel = new QLabel(QStringLiteral("%1 px").arg(m_backgroundBlurRadius), leftCard);
-    m_descBgBlurValLabel->setStyleSheet(QStringLiteral("color: #bb9af7; font-weight: bold; min-width: 42px; background: transparent; border: none;"));
-    m_descBgBlurValLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    blurRow->addWidget(m_descBgBlurSlider, 1);
-    blurRow->addWidget(m_descBgBlurValLabel);
-    leftLayout->addLayout(blurRow);
-
-    // 3. Background Desaturation Slider
-    auto *desatLbl = new QLabel(QStringLiteral("Приглушение насыщенности (0% - 100%):"), leftCard);
-    desatLbl->setStyleSheet(Theme::secondaryLabelStyle());
-    leftLayout->addWidget(desatLbl);
-
-    auto *desatRow = new QHBoxLayout();
-    m_descBgDesatSlider = new ClickableSlider(Qt::Horizontal, leftCard);
-    m_descBgDesatSlider->setRange(0, 100);
-    m_descBgDesatSlider->setValue(m_desaturationPercent);
-    m_descBgDesatSlider->setStyleSheet(Theme::sliderStyle());
-    m_descBgDesatSlider->setToolTip(QStringLiteral("Уменьшает цветность ярких фонов, чтобы они не перебивали фиолетовые и золотые акценты"));
-    connect(m_descBgDesatSlider, &QSlider::valueChanged, this, &BeatmapEditorWidget::handleBgDesatSliderChanged);
-
-    m_descBgDesatValLabel = new QLabel(QStringLiteral("%1%").arg(m_desaturationPercent), leftCard);
-    m_descBgDesatValLabel->setStyleSheet(QStringLiteral("color: #bb9af7; font-weight: bold; min-width: 42px; background: transparent; border: none;"));
-    m_descBgDesatValLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    desatRow->addWidget(m_descBgDesatSlider, 1);
-    desatRow->addWidget(m_descBgDesatValLabel);
-    leftLayout->addLayout(desatRow);
-
-    // 4. Vignette Slider
-    auto *vigLbl = new QLabel(QStringLiteral("Виньетка по краям (0% - 100%):"), leftCard);
-    vigLbl->setStyleSheet(Theme::secondaryLabelStyle());
-    leftLayout->addWidget(vigLbl);
-
-    auto *vigRow = new QHBoxLayout();
-    m_descBgVignetteSlider = new ClickableSlider(Qt::Horizontal, leftCard);
-    m_descBgVignetteSlider->setRange(0, 100);
-    m_descBgVignetteSlider->setValue(m_vignettePercent);
-    m_descBgVignetteSlider->setStyleSheet(Theme::sliderStyle());
-    m_descBgVignetteSlider->setToolTip(QStringLiteral("Мягкое затемнение по краям и углам экрана для фокусировки внимания на нотах"));
-    connect(m_descBgVignetteSlider, &QSlider::valueChanged, this, &BeatmapEditorWidget::handleBgVignetteSliderChanged);
-
-    m_descBgVignetteValLabel = new QLabel(QStringLiteral("%1%").arg(m_vignettePercent), leftCard);
-    m_descBgVignetteValLabel->setStyleSheet(QStringLiteral("color: #bb9af7; font-weight: bold; min-width: 42px; background: transparent; border: none;"));
-    m_descBgVignetteValLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    vigRow->addWidget(m_descBgVignetteSlider, 1);
-    vigRow->addWidget(m_descBgVignetteValLabel);
-    leftLayout->addLayout(vigRow);
 
     cardsRow->addWidget(leftCard);
 
@@ -1369,43 +1374,6 @@ void BeatmapEditorWidget::updateStatusNotesCount()
     }
 }
 
-void BeatmapEditorWidget::handleBgDimSliderChanged(int value)
-{
-    m_backgroundDimPercent = qBound(0, value, 100);
-    if (m_descBgDimValLabel) {
-        m_descBgDimValLabel->setText(QStringLiteral("%1%").arg(m_backgroundDimPercent));
-    }
-    update();
-}
-
-void BeatmapEditorWidget::handleBgBlurSliderChanged(int value)
-{
-    m_backgroundBlurRadius = qBound(0, value, 20);
-    if (m_descBgBlurValLabel) {
-        m_descBgBlurValLabel->setText(QStringLiteral("%1 px").arg(m_backgroundBlurRadius));
-    }
-    updateCachedBackground();
-    update();
-}
-
-void BeatmapEditorWidget::handleBgDesatSliderChanged(int value)
-{
-    m_desaturationPercent = qBound(0, value, 100);
-    if (m_descBgDesatValLabel) {
-        m_descBgDesatValLabel->setText(QStringLiteral("%1%").arg(m_desaturationPercent));
-    }
-    updateCachedBackground();
-    update();
-}
-
-void BeatmapEditorWidget::handleBgVignetteSliderChanged(int value)
-{
-    m_vignettePercent = qBound(0, value, 100);
-    if (m_descBgVignetteValLabel) {
-        m_descBgVignetteValLabel->setText(QStringLiteral("%1%").arg(m_vignettePercent));
-    }
-    update();
-}
 bool BeatmapEditorWidget::isMetadataModified() const
 {
     if (m_currentBeatmap.meta.title != m_initialMeta.title) return true;
@@ -1501,6 +1469,23 @@ void BeatmapEditorWidget::setMapDuration(int durationMs)
         m_metaDurationSpin->setValue(m_totalDurationMs / 1000);
         m_metaDurationSpin->blockSignals(false);
     }
+    if (m_sideDurationSpin) {
+        m_sideDurationSpin->blockSignals(true);
+        m_sideDurationSpin->setValue(m_totalDurationMs / 1000);
+        m_sideDurationSpin->blockSignals(false);
+    }
+
+    if (m_speedCombo) {
+        int idx = m_speedCombo->findData(1.0);
+        if (idx >= 0) {
+            m_speedCombo->blockSignals(true);
+            m_speedCombo->setCurrentIndex(idx);
+            m_speedCombo->blockSignals(false);
+        }
+    }
+    if (m_mediaPlayer) {
+        m_mediaPlayer->setPlaybackRate(1.0);
+    }
 
     updateTimeDisplay(static_cast<int>(m_mediaPlayer->position()));
     updateStats();
@@ -1510,6 +1495,12 @@ void BeatmapEditorWidget::setMapDuration(int durationMs)
 void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &audioPath, const QString &coverPath)
 {
     stopPlayback();
+    if (m_mediaPlayer) {
+        m_mediaPlayer->setPosition(0);
+    }
+    m_clockBaseMs = 0;
+    m_lastMediaPos = -1;
+    m_lastReportedPlaybackMs = 0.0;
     if (m_tabEditorBtn) {
         m_tabEditorBtn->setChecked(true);
     }
@@ -1545,33 +1536,44 @@ void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &aud
     if (m_currentBeatmap.meta.bpm <= 0.0) {
         m_currentBeatmap.meta.bpm = 120.0;
     }
+    m_metaBpmSpin->blockSignals(true);
     m_metaBpmSpin->setValue(m_currentBeatmap.meta.bpm);
-    m_metaOffsetSpin->setValue(m_currentBeatmap.meta.audioOffset);
+    m_metaBpmSpin->blockSignals(false);
 
-    if (m_descBgDimSlider) {
-        m_descBgDimSlider->setValue(m_backgroundDimPercent);
+    if (m_sideBpmSpin) {
+        m_sideBpmSpin->blockSignals(true);
+        m_sideBpmSpin->setValue(m_currentBeatmap.meta.bpm);
+        m_sideBpmSpin->blockSignals(false);
     }
-    if (m_descBgDimValLabel) {
-        m_descBgDimValLabel->setText(QStringLiteral("%1%").arg(m_backgroundDimPercent));
+
+    m_metaOffsetSpin->blockSignals(true);
+    m_metaOffsetSpin->setValue(m_currentBeatmap.meta.audioOffset);
+    m_metaOffsetSpin->blockSignals(false);
+
+    if (m_sideOffsetSpin) {
+        m_sideOffsetSpin->blockSignals(true);
+        m_sideOffsetSpin->setValue(m_currentBeatmap.meta.audioOffset);
+        m_sideOffsetSpin->blockSignals(false);
     }
-    if (m_descBgBlurSlider) {
-        m_descBgBlurSlider->setValue(m_backgroundBlurRadius);
+
+    if (m_sideDurationSpin) {
+        m_sideDurationSpin->blockSignals(true);
+        m_sideDurationSpin->setValue(m_totalDurationMs / 1000);
+        m_sideDurationSpin->blockSignals(false);
     }
-    if (m_descBgBlurValLabel) {
-        m_descBgBlurValLabel->setText(QStringLiteral("%1 px").arg(m_backgroundBlurRadius));
+
+    if (m_speedCombo) {
+        int idx = m_speedCombo->findData(1.0);
+        if (idx >= 0) {
+            m_speedCombo->blockSignals(true);
+            m_speedCombo->setCurrentIndex(idx);
+            m_speedCombo->blockSignals(false);
+        }
     }
-    if (m_descBgDesatSlider) {
-        m_descBgDesatSlider->setValue(m_desaturationPercent);
+    if (m_mediaPlayer) {
+        m_mediaPlayer->setPlaybackRate(1.0);
     }
-    if (m_descBgDesatValLabel) {
-        m_descBgDesatValLabel->setText(QStringLiteral("%1%").arg(m_desaturationPercent));
-    }
-    if (m_descBgVignetteSlider) {
-        m_descBgVignetteSlider->setValue(m_vignettePercent);
-    }
-    if (m_descBgVignetteValLabel) {
-        m_descBgVignetteValLabel->setText(QStringLiteral("%1%").arg(m_vignettePercent));
-    }
+
     updateCachedBackground();
     updateStatusNotesCount();
     if (m_descAudioPathLabel) {
@@ -1642,11 +1644,15 @@ void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &aud
 
 void BeatmapEditorWidget::stopPlayback()
 {
-    m_mediaPlayer->stop();
+    if (m_mediaPlayer) {
+        m_mediaPlayer->stop();
+        m_mediaPlayer->setPosition(0);
+    }
     m_playbackTimer->stop();
     m_audioClock.invalidate();
     m_clockBaseMs = 0;
-    m_lastMediaPos = 0;
+    m_lastMediaPos = -1;
+    m_lastReportedPlaybackMs = 0.0;
     m_timelineCanvas->setCurrentTime(0);
     m_userScrolledAway = false;
     m_playheadInViewMs = 0;
@@ -1667,13 +1673,19 @@ void BeatmapEditorWidget::handlePlayPauseToggle()
         m_userScrolledAway = false;
         m_playheadInViewMs = 0;
         int currentMs = static_cast<int>(m_mediaPlayer->position());
+        m_clockBaseMs = currentMs;
+        m_lastMediaPos = currentMs;
+        m_lastReportedPlaybackMs = static_cast<double>(currentMs);
+        if (m_audioClock.isValid()) {
+            m_audioClock.restart();
+        }
         double w = m_timelineCanvas->width();
         double pxPerMs = m_timelineCanvas->pixelsPerSecond() / 1000.0;
         double playheadX = m_timelineCanvas->timeToX(currentMs);
 
-        // If red line is currently outside the normal viewing zone, page it into view at 15% from left
-        if (w > 100 && pxPerMs > 0.0001 && (playheadX < 0 || playheadX > 0.85 * w)) {
-            int newScroll = qMax(0, currentMs - static_cast<int>((0.15 * w) / pxPerMs));
+        // If red line is currently outside the normal viewing zone, bring it into view at 20% from left
+        if (w > 100 && pxPerMs > 0.0001 && (playheadX < 0.10 * w || playheadX > 0.85 * w)) {
+            int newScroll = qMax(0, currentMs - static_cast<int>((0.20 * w) / pxPerMs));
             m_isAutoScrolling = true;
             m_timelineCanvas->setScrollTime(newScroll);
             m_isAutoScrolling = false;
@@ -1709,14 +1721,12 @@ void BeatmapEditorWidget::handleStepForward()
 
 void BeatmapEditorWidget::handleSpeedChanged(int index)
 {
+    Q_UNUSED(index);
+    if (!m_speedCombo || !m_mediaPlayer) return;
     AudioManager::instance().playClickSound();
-    qreal speed = 1.0;
-    switch (index) {
-        case 0: speed = 0.25; break;
-        case 1: speed = 0.50; break;
-        case 2: speed = 0.75; break;
-        case 3: speed = 1.00; break;
-        default: speed = 1.00; break;
+    qreal speed = m_speedCombo->currentData().toReal();
+    if (speed <= 0.0) {
+        speed = 1.0;
     }
     m_mediaPlayer->setPlaybackRate(speed);
 }
@@ -1739,6 +1749,7 @@ void BeatmapEditorWidget::handleSeekRequested(int timeMs)
 {
     m_clockBaseMs = timeMs;
     m_lastMediaPos = timeMs;
+    m_lastReportedPlaybackMs = static_cast<double>(timeMs);
     if (m_audioClock.isValid()) {
         m_audioClock.restart();
     }
@@ -1748,16 +1759,20 @@ void BeatmapEditorWidget::handleSeekRequested(int timeMs)
 
     m_userScrolledAway = false;
     m_playheadInViewMs = 0;
-    double w = m_timelineCanvas->width();
-    double pxPerMs = m_timelineCanvas->pixelsPerSecond() / 1000.0;
-    double playheadX = m_timelineCanvas->timeToX(timeMs);
 
-    // If seeking puts red line outside normal viewing zone, page it into view at 15% from left
-    if (w > 100 && pxPerMs > 0.0001 && (playheadX < 0 || playheadX > 0.85 * w)) {
-        int newScroll = qMax(0, timeMs - static_cast<int>((0.15 * w) / pxPerMs));
-        m_isAutoScrolling = true;
-        m_timelineCanvas->setScrollTime(newScroll);
-        m_isAutoScrolling = false;
+    // Do NOT jerk the canvas while the user is actively scrubbing the ruler
+    if (!m_timelineCanvas->isScrubbingRuler()) {
+        double w = m_timelineCanvas->width();
+        double pxPerMs = m_timelineCanvas->pixelsPerSecond() / 1000.0;
+        double playheadX = m_timelineCanvas->timeToX(timeMs);
+
+        // Only bring playhead into view if seeking placed it completely off-screen
+        if (w > 100 && pxPerMs > 0.0001 && (playheadX < 0 || playheadX > w)) {
+            int newScroll = qMax(0, timeMs - static_cast<int>((0.30 * w) / pxPerMs));
+            m_isAutoScrolling = true;
+            m_timelineCanvas->setScrollTime(newScroll);
+            m_isAutoScrolling = false;
+        }
     }
 }
 
@@ -1803,6 +1818,7 @@ void BeatmapEditorWidget::handleNoteAddRequested(int timeMs)
     note.timeMs = timeMs;
     note.type = QStringLiteral("single");
 
+    AudioManager::instance().playClickSound();
     m_undoStack.push(new AddNoteCommand(this, note));
 }
 
@@ -1831,6 +1847,7 @@ void BeatmapEditorWidget::handleNotesBatchAddRequested(const QVector<NoteData> &
 void BeatmapEditorWidget::handleNoteDeleteRequested(int noteIndex)
 {
     if (noteIndex >= 0 && noteIndex < m_currentBeatmap.notes.size()) {
+        AudioManager::instance().playClickSound();
         QVector<NoteData> toDelete;
         toDelete.append(m_currentBeatmap.notes[noteIndex]);
         m_undoStack.push(new DeleteNotesCommand(this, toDelete));
@@ -1846,6 +1863,7 @@ void BeatmapEditorWidget::handleNotesDeleteRequested(const QVector<int> &indices
         }
     }
     if (!toDelete.isEmpty()) {
+        AudioManager::instance().playClickSound();
         m_undoStack.push(new DeleteNotesCommand(this, toDelete));
     }
 }
@@ -1899,7 +1917,6 @@ void BeatmapEditorWidget::handleRedo()
 
 void BeatmapEditorWidget::executeAddNote(const NoteData &note)
 {
-    AudioManager::instance().playClickSound();
     m_currentBeatmap.notes.append(note);
     std::sort(m_currentBeatmap.notes.begin(), m_currentBeatmap.notes.end(), [](const NoteData &a, const NoteData &b) {
         return a.timeMs < b.timeMs;
@@ -1932,7 +1949,6 @@ void BeatmapEditorWidget::executeRemoveNote(const NoteData &note)
 
 void BeatmapEditorWidget::executeDeleteNotes(const QVector<NoteData> &notes)
 {
-    AudioManager::instance().playClickSound();
     QSet<int> timesToRemove;
     for (const auto &n : notes) timesToRemove.insert(n.timeMs);
 
@@ -2129,6 +2145,17 @@ void BeatmapEditorWidget::handleBpmChanged(double bpm)
     m_isMetadataModified = true;
     m_currentBeatmap.meta.bpm = bpm;
     m_timelineCanvas->setBpm(bpm); // Instant dynamic grid re-render (Card 11)
+
+    if (m_metaBpmSpin && m_metaBpmSpin->value() != bpm) {
+        m_metaBpmSpin->blockSignals(true);
+        m_metaBpmSpin->setValue(bpm);
+        m_metaBpmSpin->blockSignals(false);
+    }
+    if (m_sideBpmSpin && m_sideBpmSpin->value() != bpm) {
+        m_sideBpmSpin->blockSignals(true);
+        m_sideBpmSpin->setValue(bpm);
+        m_sideBpmSpin->blockSignals(false);
+    }
 }
 
 void BeatmapEditorWidget::handleOffsetChanged(int offsetMs)
@@ -2136,6 +2163,17 @@ void BeatmapEditorWidget::handleOffsetChanged(int offsetMs)
     m_isMetadataModified = true;
     m_currentBeatmap.meta.audioOffset = offsetMs;
     m_timelineCanvas->setAudioOffset(offsetMs); // Instant dynamic grid re-render (Card 11)
+
+    if (m_metaOffsetSpin && m_metaOffsetSpin->value() != offsetMs) {
+        m_metaOffsetSpin->blockSignals(true);
+        m_metaOffsetSpin->setValue(offsetMs);
+        m_metaOffsetSpin->blockSignals(false);
+    }
+    if (m_sideOffsetSpin && m_sideOffsetSpin->value() != offsetMs) {
+        m_sideOffsetSpin->blockSignals(true);
+        m_sideOffsetSpin->setValue(offsetMs);
+        m_sideOffsetSpin->blockSignals(false);
+    }
 }
 
 void BeatmapEditorWidget::handleQuantPresetChanged(int index)
@@ -2487,49 +2525,93 @@ void BeatmapEditorWidget::updatePlaybackTick()
         qint64 currentMediaPos = m_mediaPlayer->position();
         if (currentMediaPos != m_lastMediaPos) {
             m_lastMediaPos = currentMediaPos;
-            m_clockBaseMs = currentMediaPos;
-            m_audioClock.restart();
+            double currentEst = static_cast<double>(m_clockBaseMs) + (m_audioClock.isValid() ? (m_audioClock.nsecsElapsed() / 1000000.0) * rate : 0.0);
+            double diff = static_cast<double>(currentMediaPos) - currentEst;
+            if (qAbs(diff) > 200.0) {
+                m_clockBaseMs = currentMediaPos;
+                m_lastReportedPlaybackMs = static_cast<double>(currentMediaPos);
+                m_audioClock.restart();
+            }
         }
-        int interpolatedMs = m_clockBaseMs + static_cast<int>(m_audioClock.elapsed() * rate);
-        interpolatedMs = qBound(0, interpolatedMs, m_totalDurationMs);
-        m_timelineCanvas->setCurrentTime(interpolatedMs);
-        updateTimeDisplay(interpolatedMs);
+        double preciseTimeMs = static_cast<double>(m_clockBaseMs) + (m_audioClock.isValid() ? (m_audioClock.nsecsElapsed() / 1000000.0) * rate : 0.0);
+        if (preciseTimeMs < m_lastReportedPlaybackMs && (m_lastReportedPlaybackMs - preciseTimeMs) < 400.0) {
+            preciseTimeMs = m_lastReportedPlaybackMs;
+        } else {
+            m_lastReportedPlaybackMs = preciseTimeMs;
+        }
+        m_lastReportedPlaybackMs = preciseTimeMs;
+
+        if (preciseTimeMs >= m_totalDurationMs) {
+            m_mediaPlayer->pause();
+            m_timelineCanvas->setCurrentTime(m_totalDurationMs);
+            updateTimeDisplay(m_totalDurationMs);
+            return;
+        }
+
+        preciseTimeMs = qBound(0.0, preciseTimeMs, static_cast<double>(m_totalDurationMs));
+
+        m_timelineCanvas->setCurrentTime(preciseTimeMs);
+        updateTimeDisplay(static_cast<int>(preciseTimeMs));
 
         double w = m_timelineCanvas->width();
         double pxPerMs = m_timelineCanvas->pixelsPerSecond() / 1000.0;
         if (w > 100 && pxPerMs > 0.0001 && !m_isScrubbing && !m_timelineCanvas->isInteracting()) {
-            double playheadX = m_timelineCanvas->timeToX(interpolatedMs);
+            double playheadX = m_timelineCanvas->timeToX(preciseTimeMs);
+
+            double rightThreshold = 0.75 * w;
+            double leftThreshold = 0.20 * w;
 
             if (m_userScrolledAway) {
-                // User navigated away. Check if they returned and are viewing the red line:
-                bool inViewingZone = (playheadX >= 0.05 * w && playheadX <= 0.85 * w);
+                // User navigated away. Check if they returned and are viewing the marker:
+                bool inViewingZone = (playheadX >= leftThreshold && playheadX <= rightThreshold);
                 if (inViewingZone) {
                     m_playheadInViewMs += 16;
-                    if (m_playheadInViewMs >= 700) {
-                        // Watched the red line for ~0.7s: seamlessly re-magnetize!
+                    if (m_playheadInViewMs >= 500) {
                         m_userScrolledAway = false;
                         m_playheadInViewMs = 0;
                     }
-                } else if (playheadX > 0.85 * w && playheadX < w + 80 && m_playheadInViewMs > 100) {
-                    // Reached the right threshold while in view: page forward and re-magnetize
+                } else if ((playheadX > rightThreshold && playheadX < w + 80) ||
+                           (playheadX < leftThreshold && playheadX > -80)) {
+                    // Approached either edge while in view: seamlessly re-magnetize and follow
                     m_userScrolledAway = false;
                     m_playheadInViewMs = 0;
-                    int newScroll = qMax(0, interpolatedMs - static_cast<int>((0.15 * w) / pxPerMs));
-                    m_isAutoScrolling = true;
-                    m_timelineCanvas->setScrollTime(newScroll);
-                    m_isAutoScrolling = false;
                 } else {
                     m_playheadInViewMs = 0;
                 }
-            } else {
-                // Active auto-following mode (Page Scroll):
-                // Red line moves across screen. When it reaches ~85% of screen width (or is off-screen),
-                // page screen forward so that red line is comfortably placed at 15% from left.
-                if (playheadX > 0.85 * w || playheadX < 0) {
-                    int newScroll = qMax(0, interpolatedMs - static_cast<int>((0.15 * w) / pxPerMs));
-                    m_isAutoScrolling = true;
-                    m_timelineCanvas->setScrollTime(newScroll);
-                    m_isAutoScrolling = false;
+            }
+
+            if (!m_userScrolledAway) {
+                // Smooth continuous bidirectional tracking:
+                if (playheadX > rightThreshold) {
+                    if (playheadX > w + 120) {
+                        // Far off screen to the right: bring into view
+                        double newScroll = qMax(0.0, preciseTimeMs - ((0.20 * w) / pxPerMs));
+                        m_isAutoScrolling = true;
+                        m_timelineCanvas->setScrollTimePrecise(newScroll);
+                        m_isAutoScrolling = false;
+                    } else {
+                        // Smooth continuous tracking as playhead pushes past right margin
+                        double targetScroll = preciseTimeMs - (rightThreshold / pxPerMs);
+                        targetScroll = qBound(0.0, targetScroll, static_cast<double>(m_timelineCanvas->maxScrollTime()));
+                        m_isAutoScrolling = true;
+                        m_timelineCanvas->setScrollTimePrecise(targetScroll);
+                        m_isAutoScrolling = false;
+                    }
+                } else if (playheadX < leftThreshold) {
+                    if (playheadX < -120) {
+                        // Far off screen to the left: bring into view
+                        double newScroll = qMax(0.0, preciseTimeMs - ((0.20 * w) / pxPerMs));
+                        m_isAutoScrolling = true;
+                        m_timelineCanvas->setScrollTimePrecise(newScroll);
+                        m_isAutoScrolling = false;
+                    } else {
+                        // Smooth continuous tracking as playhead approaches or pushes past left margin
+                        double targetScroll = preciseTimeMs - (leftThreshold / pxPerMs);
+                        targetScroll = qBound(0.0, targetScroll, static_cast<double>(m_timelineCanvas->maxScrollTime()));
+                        m_isAutoScrolling = true;
+                        m_timelineCanvas->setScrollTimePrecise(targetScroll);
+                        m_isAutoScrolling = false;
+                    }
                 }
             }
         }

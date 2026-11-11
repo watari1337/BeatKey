@@ -6,6 +6,7 @@
 #include <QSet>
 #include <QPointF>
 #include <QRectF>
+#include <QTimer>
 
 #include "beatmap.h"
 #include "audiowaveform.h"
@@ -41,6 +42,7 @@ public:
     void setTotalDuration(int durationMs);
     void setCurrentTime(int timeMs);
     void setScrollTime(int timeMs);
+    void setScrollTimePrecise(double timeMs);
     void setActiveTool(EditorTool tool);
     void setWaveform(const AudioWaveform *waveform);
 
@@ -56,8 +58,10 @@ public:
     double bpm() const { return m_bpm; }
     int audioOffset() const { return m_audioOffsetMs; }
     int quantDivisor() const { return m_quantDivisor; }
-    int currentTime() const { return m_currentTimeMs; }
-    int scrollTime() const { return m_scrollTimeMs; }
+    int currentTime() const { return static_cast<int>(m_currentTimeMs); }
+    double currentTimePrecise() const { return m_currentTimeMs; }
+    int scrollTime() const { return static_cast<int>(std::round(m_scrollTimeMs)); }
+    double scrollTimePrecise() const { return m_scrollTimeMs; }
     int totalDuration() const { return m_totalDurationMs; }
     int visibleTimeMs() const;
     int maxScrollTime() const;
@@ -66,6 +70,7 @@ public:
     bool isInteracting() const {
         return m_isPanning || m_isDraggingNotes || m_isBrushingPlace || m_isBrushingErase || m_isScrubbingRuler;
     }
+    bool isScrubbingRuler() const { return m_isScrubbingRuler; }
     int snapTime(int timeMs) const;
     double quantIntervalMs() const;
     double measureDurationMs() const;
@@ -74,7 +79,8 @@ public:
     void triggerTapFlash(int timeMs);
 
     // Helpers
-    double timeToX(int timeMs) const;
+    double timeToX(double timeMs) const;
+    void setCurrentTime(double timeMs);
     int xToTime(double x) const;
 
 signals:
@@ -107,6 +113,7 @@ private:
     void drawPlayhead(QPainter &painter, int w, int h, double rulerH);
     void updateHoverInfo();
     void updateScrollBounds();
+    void onEdgeScrollTimeout();
 
     // Data
     QVector<NoteData> m_notes;
@@ -114,8 +121,8 @@ private:
     int m_audioOffsetMs;
     int m_quantDivisor; // 1 to 64
     int m_totalDurationMs;
-    int m_currentTimeMs;
-    int m_scrollTimeMs;
+    double m_currentTimeMs;
+    double m_scrollTimeMs;
 
     // Waveform
     const AudioWaveform *m_waveform;
@@ -136,7 +143,7 @@ private:
     // Middle-mouse-button (MMB) canvas panning
     bool m_isPanning;
     double m_panStartMouseX;
-    int m_panStartScrollTime;
+    double m_panStartScrollTime;
 
     // Drag-and-drop notes with threshold & live snap
     bool m_dragPending;
@@ -166,6 +173,7 @@ private:
 
     // Viewport
     double m_pixelsPerSecond;
+    QTimer *m_edgeScrollTimer = nullptr;
 };
 
 #endif // EDITORTIMELINECANVAS_H

@@ -646,6 +646,81 @@ QString accentLabelStyle()
     );
 }
 
+QString failDialogContainerStyle()
+{
+    return QStringLiteral(
+        "#failDialogContainer {"
+        "  background: rgba(26, 12, 24, 245);"
+        "  border: 2px solid rgba(217, 83, 111, 220);"
+        "  border-radius: 16px;"
+        "}"
+    );
+}
+
+QString failDialogTitleStyle()
+{
+    return QStringLiteral(
+        "font-family: 'Segoe UI', sans-serif;"
+        "font-size: 26px;"
+        "font-weight: 900;"
+        "color: #d9536f;"
+        "background: transparent;"
+        "border: none;"
+    );
+}
+
+QString failStatBoxStyle()
+{
+    return QStringLiteral(
+        "background: rgba(42, 20, 36, 180);"
+        "border-radius: 8px;"
+        "border: 1px solid rgba(217, 83, 111, 90);"
+    );
+}
+
+QString failStatValueStyle()
+{
+    return QStringLiteral(
+        "font-size: 16px;"
+        "font-weight: bold;"
+        "color: #ffffff;"
+        "background: transparent;"
+        "border: none;"
+    );
+}
+
+QString failStatTitleStyle()
+{
+    return QStringLiteral(
+        "font-size: 11px;"
+        "color: #a09cb0;"
+        "background: transparent;"
+        "border: none;"
+    );
+}
+
+QString pauseCenterCardStyle()
+{
+    return QStringLiteral(
+        "#pauseCenterCard {"
+        "  background: rgba(18, 12, 34, 240);"
+        "  border: 1.5px solid rgba(125, 68, 207, 210);"
+        "  border-radius: 16px;"
+        "}"
+    );
+}
+
+QString pauseGlassCardStyle()
+{
+    return QStringLiteral(
+        "#pauseGlassCard {"
+        "  background: rgba(18, 12, 34, 115);"
+        "  border: 1px solid rgba(125, 68, 207, 100);"
+        "  border-radius: 14px;"
+        "}"
+    );
+}
+
 } // namespace Theme
 
 // ============================================================================
@@ -710,4 +785,140 @@ void ClickableSlider::mousePressEvent(QMouseEvent *event)
         }
     }
     QSlider::mousePressEvent(event);
+}
+
+// ============================================================================
+// MarqueeLabel Implementation
+// ============================================================================
+
+MarqueeLabel::MarqueeLabel(QWidget *parent)
+    : MarqueeLabel(QString(), parent)
+{
+}
+
+MarqueeLabel::MarqueeLabel(const QString &text, QWidget *parent)
+    : QWidget(parent)
+    , m_text(text)
+    , m_textColor(Theme::Colors::TextPrimary)
+    , m_font(QFont(QStringLiteral("Segoe UI"), 13, QFont::DemiBold))
+    , m_active(false)
+    , m_scrollX(0.0)
+    , m_pauseTicks(35)
+    , m_timer(new QTimer(this))
+{
+    setAttribute(Qt::WA_TransparentForMouseEvents);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    setToolTip(m_text);
+
+    m_timer->setInterval(25);
+    connect(m_timer, &QTimer::timeout, this, [this]() { onTick(); });
+}
+
+void MarqueeLabel::setText(const QString &text)
+{
+    m_text = text;
+    m_scrollX = 0.0;
+    m_pauseTicks = 35;
+    setToolTip(m_text);
+    if (m_active) {
+        QFontMetrics fm(m_font);
+        if (fm.horizontalAdvance(m_text) > width()) {
+            m_timer->start();
+        } else {
+            m_timer->stop();
+        }
+    }
+    update();
+}
+
+void MarqueeLabel::setTextColor(const QColor &color)
+{
+    m_textColor = color;
+    update();
+}
+
+void MarqueeLabel::setLabelFont(const QFont &font)
+{
+    m_font = font;
+    update();
+}
+
+void MarqueeLabel::setActive(bool active)
+{
+    if (m_active == active) return;
+    m_active = active;
+    m_scrollX = 0.0;
+    m_pauseTicks = 35;
+    if (m_active) {
+        QFontMetrics fm(m_font);
+        if (fm.horizontalAdvance(m_text) > width() && width() > 10) {
+            m_timer->start();
+        }
+    } else {
+        m_timer->stop();
+    }
+    update();
+}
+
+QSize MarqueeLabel::sizeHint() const
+{
+    QFontMetrics fm(m_font);
+    return QSize(fm.horizontalAdvance(m_text), fm.height());
+}
+
+void MarqueeLabel::onTick()
+{
+    if (!m_active) {
+        m_timer->stop();
+        return;
+    }
+    QFontMetrics fm(m_font);
+    int textWidth = fm.horizontalAdvance(m_text);
+    if (textWidth <= width()) {
+        m_scrollX = 0.0;
+        m_timer->stop();
+        update();
+        return;
+    }
+
+    if (m_pauseTicks > 0) {
+        m_pauseTicks--;
+        return;
+    }
+
+    m_scrollX += 1.0;
+    int gap = 50;
+    int totalLoop = textWidth + gap;
+    if (m_scrollX >= totalLoop) {
+        m_scrollX = 0.0;
+        m_pauseTicks = 30;
+    }
+    update();
+}
+
+void MarqueeLabel::paintEvent(QPaintEvent *event)
+{
+    Q_UNUSED(event);
+    QPainter painter(this);
+    painter.setFont(m_font);
+    painter.setPen(m_textColor);
+
+    QFontMetrics fm(m_font);
+    int textWidth = fm.horizontalAdvance(m_text);
+    int textHeight = fm.height();
+    int y = (height() - textHeight) / 2 + fm.ascent();
+
+    if (!m_active || textWidth <= width()) {
+        QString elided = fm.elidedText(m_text, Qt::ElideRight, width());
+        painter.drawText(0, y, elided);
+        return;
+    }
+
+    painter.setClipRect(rect());
+    int gap = 50;
+    int totalLoop = textWidth + gap;
+
+    double drawX = -m_scrollX;
+    painter.drawText(QPointF(drawX, y), m_text);
+    painter.drawText(QPointF(drawX + totalLoop, y), m_text);
 }

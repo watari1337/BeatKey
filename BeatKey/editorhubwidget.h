@@ -10,6 +10,8 @@
 
 #include "beatmap.h"
 
+class MarqueeLabel;
+
 /**
  * @brief EditorHubWidget acts as the beatmap management hub for the editor.
  *
@@ -39,6 +41,7 @@ private slots:
     void handleCreateNewMap();
     void handleImportFolder();
     void handleMapSelected(int row);
+    void selectMapSilently(int row);
 
 private:
     void setupUi();
@@ -71,6 +74,7 @@ private:
     QLabel *m_notesCountLabel;
     QLabel *m_durationLabel;
     QPushButton *m_startEditBtn;
+    QVector<MarqueeLabel*> m_cardTitleLabels;
 };
 
 #endif // EDITORHUBWIDGET_H

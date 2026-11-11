@@ -234,7 +234,7 @@ void AudioManager::playClearSound()
 
 void AudioManager::playClickSound()
 {
-    if (m_clickDebounceTimer.isValid() && m_clickDebounceTimer.elapsed() < 70) {
+    if (m_clickDebounceTimer.isValid() && m_clickDebounceTimer.elapsed() < 120) {
         return;
     }
     m_clickDebounceTimer.start();

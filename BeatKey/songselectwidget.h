@@ -10,6 +10,8 @@
 
 #include "beatmap.h"
 
+class MarqueeLabel;
+
 /**
  * @brief SongSelectWidget provides the song selection carousel and detail card.
  *
@@ -38,6 +40,7 @@ protected:
 private slots:
     void handleImportFolder();
     void handleSongSelected(int row);
+    void selectSongSilently(int row);
 
 private:
     void setupUi();
@@ -69,6 +72,7 @@ private:
     QLabel *m_notesCountLabel;
     QLabel *m_durationLabel;
     QPushButton *m_startPlayBtn;
+    QVector<MarqueeLabel*> m_cardTitleLabels;
 };
 
 #endif // SONGSELECTWIDGET_H

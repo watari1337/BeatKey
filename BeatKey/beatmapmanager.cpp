@@ -153,6 +153,126 @@ int BeatmapManager::importAllFromDirectory(const QString &sourceDirPath,
 // Single File Loading & Validation (TZ 4.10.4)
 // ============================================================================
 
+namespace {
+
+/**
+ * @brief Безопасное извлечение файла из ZIP-архива с поддержкой кириллицы и различных кодировок.
+ *
+ * Стандартный QZipReader на платформе Windows имеет известную особенность реализации:
+ * имена файлов в архиве декодируются через QString::fromLocal8Bit(raw_bytes), в то время как
+ * современные архиваторы (включая QZipWriter) сохраняют имена в кодировке UTF-8.
+ * В результате прямой поиск reader.fileData(name) для файлов с кириллицей возвращает пустой массив.
+ * Данная функция решает проблему многоступенчатым сопоставлением.
+ */
+QByteArray extractZipFileData(const QZipReader &reader, const QString &targetName, QString *matchedEntryName = nullptr)
+{
+    if (targetName.isEmpty()) {
+        return QByteArray();
+    }
+
+    // 1. Прямая попытка через стандартный fileData (работает для ASCII или совпадающей кодировки)
+    QByteArray data = reader.fileData(targetName);
+    if (!data.isEmpty()) {
+        if (matchedEntryName) *matchedEntryName = targetName;
+        return data;
+    }
+
+    // 2. Попытка с преобразованием UTF-8 -> Local8Bit (компенсация поведения QZipReader на Windows)
+    QString local8BitTarget = QString::fromLocal8Bit(targetName.toUtf8());
+    data = reader.fileData(local8BitTarget);
+    if (!data.isEmpty()) {
+        if (matchedEntryName) *matchedEntryName = local8BitTarget;
+        return data;
+    }
+
+    // 3. Сканирование fileInfoList() со сравнением очищенных имен и альтернативных кодировок
+    const auto fileList = reader.fileInfoList();
+    QString targetClean = QFileInfo(targetName).fileName();
+
+    for (const auto &info : fileList) {
+        if (!info.isFile) continue;
+        QString entryName = QFileInfo(info.filePath).fileName();
+
+        // Точное совпадение имени или полного пути
+        if (info.filePath == targetName || entryName == targetName || entryName == targetClean) {
+            data = reader.fileData(info.filePath);
+            if (!data.isEmpty()) {
+                if (matchedEntryName) *matchedEntryName = info.filePath;
+                return data;
+            }
+        }
+
+        // Совпадение без учета регистра
+        if (entryName.compare(targetName, Qt::CaseInsensitive) == 0 ||
+            entryName.compare(targetClean, Qt::CaseInsensitive) == 0) {
+            data = reader.fileData(info.filePath);
+            if (!data.isEmpty()) {
+                if (matchedEntryName) *matchedEntryName = info.filePath;
+                return data;
+            }
+        }
+
+        // Восстановление оригинального UTF-8, если имя в архиве было прочитано через fromLocal8Bit
+        QString decodedAsUtf8 = QString::fromUtf8(info.filePath.toLocal8Bit());
+        QString decodedAsUtf8Clean = QFileInfo(decodedAsUtf8).fileName();
+        if (decodedAsUtf8 == targetName || decodedAsUtf8Clean == targetClean ||
+            decodedAsUtf8.compare(targetName, Qt::CaseInsensitive) == 0 ||
+            decodedAsUtf8Clean.compare(targetClean, Qt::CaseInsensitive) == 0) {
+            data = reader.fileData(info.filePath);
+            if (!data.isEmpty()) {
+                if (matchedEntryName) *matchedEntryName = info.filePath;
+                return data;
+            }
+        }
+
+        // Обратная проверка: если имя в архиве было записано в локальной кодировке
+        QString decodedFromLocal = QString::fromLocal8Bit(info.filePath.toUtf8());
+        if (decodedFromLocal == targetName ||
+            decodedFromLocal.compare(targetName, Qt::CaseInsensitive) == 0) {
+            data = reader.fileData(info.filePath);
+            if (!data.isEmpty()) {
+                if (matchedEntryName) *matchedEntryName = info.filePath;
+                return data;
+            }
+        }
+    }
+
+    // 4. Резервный поиск по расширению аудиофайла (.mp3, .wav, .ogg)
+    QString targetExt = QFileInfo(targetName).suffix().toLower();
+    if (targetExt == QStringLiteral("mp3") || targetExt == QStringLiteral("wav") || targetExt == QStringLiteral("ogg")) {
+        for (const auto &info : fileList) {
+            if (!info.isFile) continue;
+            QString ext = QFileInfo(info.filePath).suffix().toLower();
+            if (ext == QStringLiteral("mp3") || ext == QStringLiteral("wav") || ext == QStringLiteral("ogg")) {
+                data = reader.fileData(info.filePath);
+                if (!data.isEmpty()) {
+                    if (matchedEntryName) *matchedEntryName = info.filePath;
+                    return data;
+                }
+            }
+        }
+    }
+
+    // 5. Резервный поиск по расширению обложки (.png, .jpg, .jpeg)
+    if (targetExt == QStringLiteral("png") || targetExt == QStringLiteral("jpg") || targetExt == QStringLiteral("jpeg")) {
+        for (const auto &info : fileList) {
+            if (!info.isFile) continue;
+            QString ext = QFileInfo(info.filePath).suffix().toLower();
+            if (ext == QStringLiteral("png") || ext == QStringLiteral("jpg") || ext == QStringLiteral("jpeg")) {
+                data = reader.fileData(info.filePath);
+                if (!data.isEmpty()) {
+                    if (matchedEntryName) *matchedEntryName = info.filePath;
+                    return data;
+                }
+            }
+        }
+    }
+
+    return QByteArray();
+}
+
+} // namespace
+
 Beatmap BeatmapManager::loadFromFile(const QString &bkeyFilePath, QString *error)
 {
     Beatmap map;
@@ -177,7 +297,7 @@ Beatmap BeatmapManager::loadFromFile(const QString &bkeyFilePath, QString *error
     }
 
     // 2. Наличие в корне архива файла map.json
-    QByteArray mapJsonBytes = reader.fileData(QStringLiteral("map.json"));
+    QByteArray mapJsonBytes = extractZipFileData(reader, QStringLiteral("map.json"));
     if (mapJsonBytes.isEmpty()) {
         QString err = QStringLiteral("Ошибка валидации карты .bkey: в корне архива отсутствует файл map.json.");
         if (error) *error = err;
@@ -209,7 +329,8 @@ Beatmap BeatmapManager::loadFromFile(const QString &bkeyFilePath, QString *error
         return map;
     }
 
-    QByteArray audioBytes = reader.fileData(map.meta.audioFileName);
+    QString matchedAudioEntry;
+    QByteArray audioBytes = extractZipFileData(reader, map.meta.audioFileName, &matchedAudioEntry);
     if (audioBytes.isEmpty()) {
         QString err = QStringLiteral("Ошибка валидации карты .bkey: внутри архива отсутствует аудиофайл '%1'.")
                           .arg(map.meta.audioFileName);
@@ -221,7 +342,7 @@ Beatmap BeatmapManager::loadFromFile(const QString &bkeyFilePath, QString *error
 
     // 5. Загрузка файла обложки (если есть)
     if (!map.meta.coverFileName.isEmpty()) {
-        QByteArray coverBytes = reader.fileData(map.meta.coverFileName);
+        QByteArray coverBytes = extractZipFileData(reader, map.meta.coverFileName);
         if (!coverBytes.isEmpty()) {
             map.coverImage.loadFromData(coverBytes);
         }
@@ -236,7 +357,12 @@ Beatmap BeatmapManager::loadFromFile(const QString &bkeyFilePath, QString *error
     // 7. Извлечение аудиофайла в кэш для воспроизведения в AudioManager
     QString songDir = m_cacheDir + QStringLiteral("/") + calculatedHash;
     QDir().mkpath(songDir);
-    QString cachedAudioPath = songDir + QStringLiteral("/") + map.meta.audioFileName;
+
+    QString cleanAudioFileName = QFileInfo(map.meta.audioFileName).fileName();
+    if (cleanAudioFileName.isEmpty()) {
+        cleanAudioFileName = QStringLiteral("audio.") + audioExt;
+    }
+    QString cachedAudioPath = songDir + QStringLiteral("/") + cleanAudioFileName;
 
     // Записываем файл в кэш только если его там еще нет
     if (!QFile::exists(cachedAudioPath)) {

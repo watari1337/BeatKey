@@ -127,7 +127,7 @@ void EditorHubWidget::setupUi()
         "  background: #251b3d;"
         "  border: 1px solid #553388;"
         "  border-radius: 8px;"
-        "  padding: 12px 14px;"
+        "  padding: 4px 6px;"
         "  margin-bottom: 8px;"
         "  color: #ffffff;"
         "  font-family: 'Segoe UI', sans-serif;"
@@ -334,14 +334,54 @@ void EditorHubWidget::refreshMapList()
     {
         const QSignalBlocker blocker(m_mapListWidget);
         m_mapListWidget->clear();
+        m_cardTitleLabels.clear();
         for (const auto &map : m_loadedBeatmaps) {
-            QString itemText = QStringLiteral("%1 — %2\n[%3 • %4]")
-                .arg(map.meta.artist, map.meta.title, map.meta.difficultyName, map.formattedBpm());
-            m_mapListWidget->addItem(itemText);
+            auto *item = new QListWidgetItem();
+            item->setSizeHint(QSize(0, 64));
+
+            auto *cardWidget = new QWidget();
+            cardWidget->setAttribute(Qt::WA_TransparentForMouseEvents);
+            auto *cardLayout = new QHBoxLayout(cardWidget);
+            cardLayout->setContentsMargins(8, 4, 8, 4);
+            cardLayout->setSpacing(10);
+
+            // Миниатюра обложки (40x40 с достаточными отступами)
+            auto *coverLabel = new QLabel(cardWidget);
+            coverLabel->setFixedSize(40, 40);
+            coverLabel->setStyleSheet(QStringLiteral("background: transparent; border: none;"));
+            QPixmap coverPix = map.coverImage;
+            if (coverPix.isNull()) {
+                coverPix = CoverManager::standardCoverPixmap(CoverManager::StandardCover::Standard2);
+            }
+            coverLabel->setPixmap(CoverManager::createRoundedThumbnail(coverPix, 40, 6));
+            cardLayout->addWidget(coverLabel);
+
+            // Текстовый блок
+            auto *textLayout = new QVBoxLayout();
+            textLayout->setSpacing(2);
+            textLayout->setContentsMargins(0, 0, 0, 0);
+
+            auto *titleLabel = new MarqueeLabel(QStringLiteral("%1 — %2").arg(map.meta.artist, map.meta.title), cardWidget);
+            titleLabel->setLabelFont(QFont(QStringLiteral("Segoe UI"), 13, QFont::DemiBold));
+            titleLabel->setTextColor(Theme::Colors::TextPrimary);
+
+            auto *subLabel = new QLabel(QStringLiteral("[%1 • %2]").arg(map.meta.difficultyName, map.formattedBpm()), cardWidget);
+            subLabel->setStyleSheet(QStringLiteral(
+                "color: #bb9af7; font-family: 'Segoe UI', sans-serif; font-size: 11px; background: transparent;"
+            ));
+
+            textLayout->addWidget(titleLabel);
+            textLayout->addWidget(subLabel);
+            cardLayout->addLayout(textLayout, 1);
+
+            m_cardTitleLabels.append(titleLabel);
+            m_mapListWidget->addItem(item);
+            m_mapListWidget->setItemWidget(item, cardWidget);
         }
 
         if (!m_loadedBeatmaps.isEmpty()) {
             m_mapListWidget->setCurrentRow(0);
+            selectMapSilently(0);
         }
     }
 
@@ -435,14 +475,25 @@ void EditorHubWidget::playPreview(const Beatmap &map)
     }
 }
 
-void EditorHubWidget::handleMapSelected(int row)
+void EditorHubWidget::selectMapSilently(int row)
 {
     if (row < 0 || row >= m_loadedBeatmaps.size()) return;
 
-    AudioManager::instance().playClickSound();
+    for (int i = 0; i < m_cardTitleLabels.size(); ++i) {
+        if (m_cardTitleLabels[i]) {
+            m_cardTitleLabels[i]->setActive(i == row);
+        }
+    }
+
     const Beatmap &map = m_loadedBeatmaps[row];
     updateDetailsCard(map);
     playPreview(map);
+}
+
+void EditorHubWidget::handleMapSelected(int row)
+{
+    AudioManager::instance().playClickSound();
+    selectMapSilently(row);
 }
 
 void EditorHubWidget::updateDetailsCard(const Beatmap &map)

@@ -50,6 +50,14 @@ public:
                                      QString *errorMessage = nullptr);
 
     /**
+     * @brief Создает квадратную скругленную миниатюру обложки заданного размера.
+     * @param src Исходное изображение.
+     * @param size Размер стороны квадрата (в пикселях).
+     * @param radius Радиус скругления углов.
+     */
+    static QPixmap createRoundedThumbnail(const QPixmap &src, int size = 48, int radius = 8);
+
+    /**
      * @brief Проверяет формат и целостность аудиофайла трека (.mp3, .wav, .ogg).
      * @param filePath Путь к аудиофайлу на диске.
      * @param errorMessage Опциональный указатель для возврата читаемого текста ошибки.

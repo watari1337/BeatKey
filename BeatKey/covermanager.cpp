@@ -1,4 +1,6 @@
 #include "covermanager.h"
+#include <QPainter>
+#include <QPainterPath>
 #include "theme.h"
 #include "audiomanager.h"
 
@@ -316,4 +318,38 @@ void CoverManager::showMediaErrorDialog(QWidget *parent,
 
     outerLayout->addWidget(container);
     dialog.exec();
+}
+
+QPixmap CoverManager::createRoundedThumbnail(const QPixmap &src, int size, int radius)
+{
+    QPixmap base = src.isNull() ? standardCoverPixmap(StandardCover::Standard2) : src;
+    if (base.isNull()) {
+        QPixmap fallback(size, size);
+        fallback.fill(Theme::Colors::BackgroundDeep);
+        return fallback;
+    }
+
+    QPixmap scaled = base.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    int cropX = qMax(0, (scaled.width() - size) / 2);
+    int cropY = qMax(0, (scaled.height() - size) / 2);
+    QPixmap cropped = scaled.copy(cropX, cropY, size, size);
+
+    QPixmap result(size, size);
+    result.fill(Qt::transparent);
+
+    QPainter painter(&result);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+    QPainterPath path;
+    path.addRoundedRect(QRectF(0, 0, size, size), radius, radius);
+    painter.setClipPath(path);
+    painter.drawPixmap(0, 0, cropped);
+
+    painter.setClipping(false);
+    painter.setPen(QPen(Theme::Colors::BorderSubtle, 1.0));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRoundedRect(QRectF(0.5, 0.5, size - 1, size - 1), radius, radius);
+
+    return result;
 }

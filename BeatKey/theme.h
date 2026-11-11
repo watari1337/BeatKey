@@ -8,6 +8,7 @@
 #include <QRect>
 #include <QSlider>
 #include <QMouseEvent>
+#include <QTimer>
 
 
 class QApplication;
@@ -50,6 +51,16 @@ namespace Colors {
     inline const QColor Success{46, 204, 113};            // #2ecc71
     inline const QColor SuccessDark{27, 138, 90};         // #1b8a5a
     inline const QColor Warning{255, 170, 0};             // #ffaa00
+    inline const QColor NoteCyan{0, 229, 255};            // #00e5ff
+    inline const QColor NoteCyanDark{0, 140, 255};        // #008cff
+    inline const QColor HitLineColor{187, 154, 247, 180}; // rgba(187, 154, 247, 180)
+    inline const QColor TrackProgressBarBg{42, 31, 66, 180}; // rgba(42, 31, 66, 180)
+    inline const QColor TrackLineWhite{255, 255, 255, 200}; // Белая горизонтальная полоска от края до края
+    inline const QColor HitTargetBorder{255, 255, 255, 230}; // Обводка полого прямоугольника зоны нажатия
+    inline const QColor PauseOverlayDim{10, 6, 20, 160}; // Затемнение экрана паузы
+    inline const QColor CountdownOverlayDim{16, 10, 28, 80}; // Полупрозрачное затемнение при отсчете
+    inline const QColor CountdownBadgeBg{26, 16, 48, 120}; // Полупрозрачный фон бейджа отсчета
+    inline const QColor CountdownBadgeBorder{187, 154, 247, 180}; // Неоновый контур бейджа
 }
 
     /*namespace Colors {
@@ -153,6 +164,13 @@ namespace Colors {
     QString cardHeaderStyle();
     QString secondaryLabelStyle();
     QString accentLabelStyle();
+    QString failDialogContainerStyle();
+    QString failDialogTitleStyle();
+    QString failStatBoxStyle();
+    QString failStatValueStyle();
+    QString failStatTitleStyle();
+    QString pauseCenterCardStyle();
+    QString pauseGlassCardStyle();
 }
 
 /**
@@ -167,6 +185,42 @@ public:
 
 protected:
     void mousePressEvent(QMouseEvent *event) override;
+};
+
+/**
+ * @brief MarqueeLabel is a widget that displays text and smoothly scrolls horizontally
+ * like a ticker/marquee when active and when the text exceeds the widget's visible width.
+ */
+class MarqueeLabel : public QWidget
+{
+public:
+    explicit MarqueeLabel(QWidget *parent = nullptr);
+    explicit MarqueeLabel(const QString &text, QWidget *parent = nullptr);
+
+    void setText(const QString &text);
+    QString text() const { return m_text; }
+
+    void setTextColor(const QColor &color);
+    void setLabelFont(const QFont &font);
+
+    void setActive(bool active);
+    bool isActive() const { return m_active; }
+
+    QSize sizeHint() const override;
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+
+private:
+    void onTick();
+
+    QString m_text;
+    QColor m_textColor;
+    QFont m_font;
+    bool m_active = false;
+    double m_scrollX = 0.0;
+    int m_pauseTicks = 0;
+    QTimer *m_timer = nullptr;
 };
 
 #endif // THEME_H

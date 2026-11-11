@@ -15,12 +15,14 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QGraphicsDropShadowEffect>
+#include <QDir>
+#include <QFile>
+#include <QCoreApplication>
 #include <cmath>
 #include <algorithm>
 
 // ============================================================================
 // InGamePauseDialog Implementation
-// Полупрозрачное окно паузы с прямым доступом к настройкам звука и фона
 // ============================================================================
 class InGamePauseDialog : public QDialog
 {
@@ -31,207 +33,68 @@ public:
         : QDialog(parent)
         , m_gameplay(gameplay)
         , m_action(ActionResume)
+        , m_isDraggingBgSlider(false)
+        , m_centerCard(nullptr)
+        , m_bgCard(nullptr)
+        , m_previewTimer(new QTimer(this))
     {
         setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
         setAttribute(Qt::WA_TranslucentBackground);
         setModal(true);
 
-        auto *outerLayout = new QVBoxLayout(this);
-        outerLayout->setContentsMargins(20, 20, 20, 20);
-
-        auto *container = new QWidget(this);
-        container->setObjectName(QStringLiteral("pauseDialogContainer"));
-        container->setStyleSheet(QStringLiteral(
-            "#pauseDialogContainer {"
-            "  background: rgba(18, 12, 34, 235);"
-            "  border: 1.5px solid rgba(125, 68, 207, 210);"
-            "  border-radius: 16px;"
-            "}"
-        ));
-        container->setFixedSize(620, 480);
-
-        auto *shadow = new QGraphicsDropShadowEffect(this);
-        shadow->setBlurRadius(30);
-        shadow->setColor(QColor(0, 0, 0, 200));
-        shadow->setOffset(0, 8);
-        container->setGraphicsEffect(shadow);
-
-        auto *innerLayout = new QVBoxLayout(container);
-        innerLayout->setContentsMargins(28, 22, 28, 24);
-        innerLayout->setSpacing(14);
-
-        // 1. Шапка: Заголовок "ПАУЗА"
-        auto *titleLabel = new QLabel(QStringLiteral("ПАУЗА"), container);
-        titleLabel->setAlignment(Qt::AlignCenter);
-        titleLabel->setStyleSheet(Theme::dialogTitleStyle());
-        innerLayout->addWidget(titleLabel);
-
-        // 2. Блок основных кнопок действий
-        auto *buttonsLayout = new QHBoxLayout();
-        buttonsLayout->setSpacing(12);
-
-        auto *resumeBtn = new QPushButton(QStringLiteral("Продолжить"), container);
-        resumeBtn->setCursor(Qt::PointingHandCursor);
-        resumeBtn->setStyleSheet(Theme::primaryButtonStyle());
-        resumeBtn->setFixedHeight(38);
-        connect(resumeBtn, &QPushButton::clicked, this, [this]() {
-            m_action = ActionResume;
-            accept();
+        m_previewTimer->setSingleShot(true);
+        connect(m_previewTimer, &QTimer::timeout, this, [this]() {
+            setBgPreviewMode(false);
         });
-        buttonsLayout->addWidget(resumeBtn);
 
-        auto *retryBtn = new QPushButton(QStringLiteral("Начать заново"), container);
-        retryBtn->setCursor(Qt::PointingHandCursor);
-        retryBtn->setStyleSheet(Theme::secondaryButtonStyle());
-        retryBtn->setFixedHeight(38);
-        connect(retryBtn, &QPushButton::clicked, this, [this]() {
-            m_action = ActionRestart;
-            accept();
-        });
-        buttonsLayout->addWidget(retryBtn);
-
-        auto *exitBtn = new QPushButton(QStringLiteral("К выбору карт"), container);
-        exitBtn->setCursor(Qt::PointingHandCursor);
-        exitBtn->setStyleSheet(Theme::dangerButtonStyle());
-        exitBtn->setFixedHeight(38);
-        connect(exitBtn, &QPushButton::clicked, this, [this]() {
-            m_action = ActionExit;
-            accept();
-        });
-        buttonsLayout->addWidget(exitBtn);
-
-        innerLayout->addLayout(buttonsLayout);
-
-        // Разделительная линия
-        auto *sep = new QFrame(container);
-        sep->setFrameShape(QFrame::HLine);
-        sep->setStyleSheet(QStringLiteral("background: rgba(125, 68, 207, 120); max-height: 1px;"));
-        innerLayout->addWidget(sep);
-
-        // 3. Двухколоночный блок настроек: Звук (слева) и Визуальное оформление фона (справа)
-        auto *settingsColumnsLayout = new QHBoxLayout();
-        settingsColumnsLayout->setSpacing(24);
-
-        // Левая колонка: Настройки звука
-        auto *soundCol = new QVBoxLayout();
-        soundCol->setSpacing(8);
-
-        auto *soundHeader = new QLabel(QStringLiteral("Настройки звука"), container);
-        soundHeader->setStyleSheet(Theme::accentLabelStyle());
-        soundCol->addWidget(soundHeader);
-
-        auto addSliderRow = [&](QVBoxLayout *col, const QString &name, int val, int minV, int maxV, auto onChange) {
-            auto *lbl = new QLabel(QStringLiteral("%1: %2%").arg(name).arg(val), container);
-            lbl->setStyleSheet(Theme::secondaryLabelStyle());
-            auto *slider = new QSlider(Qt::Horizontal, container);
-            slider->setRange(minV, maxV);
-            slider->setValue(val);
-            slider->setStyleSheet(Theme::sliderStyle());
-            connect(slider, &QSlider::valueChanged, container, [lbl, name, onChange](int v) {
-                lbl->setText(QStringLiteral("%1: %2%").arg(name).arg(v));
-                onChange(v);
-            });
-            col->addWidget(lbl);
-            col->addWidget(slider);
-        };
-
-        auto &mgr = SettingsManager::instance();
-        addSliderRow(soundCol, QStringLiteral("Общая громкость"), mgr.masterVolume(), 0, 100, [&mgr](int v) {
-            mgr.setMasterVolume(v);
-        });
-        addSliderRow(soundCol, QStringLiteral("Музыка"), mgr.musicVolume(), 0, 100, [&mgr](int v) {
-            mgr.setMusicVolume(v);
-        });
-        addSliderRow(soundCol, QStringLiteral("Эффекты"), mgr.sfxVolume(), 0, 100, [&mgr](int v) {
-            mgr.setSfxVolume(v);
-        });
-        soundCol->addStretch(1);
-        settingsColumnsLayout->addLayout(soundCol, 1);
-
-        // Правая колонка: Настройки фона (как в редакторе)
-        auto *bgCol = new QVBoxLayout();
-        bgCol->setSpacing(8);
-
-        auto *bgHeader = new QLabel(QStringLiteral("Отображение фона"), container);
-        bgHeader->setStyleSheet(Theme::accentLabelStyle());
-        bgCol->addWidget(bgHeader);
-
-        // Затемнение
-        {
-            auto *lbl = new QLabel(QStringLiteral("Затемнение: %1%").arg(m_gameplay->bgDimPercent()), container);
-            lbl->setStyleSheet(Theme::secondaryLabelStyle());
-            auto *slider = new QSlider(Qt::Horizontal, container);
-            slider->setRange(0, 100);
-            slider->setValue(m_gameplay->bgDimPercent());
-            slider->setStyleSheet(Theme::sliderStyle());
-            connect(slider, &QSlider::valueChanged, container, [this, lbl](int v) {
-                lbl->setText(QStringLiteral("Затемнение: %1%").arg(v));
-                m_gameplay->setBgDimPercent(v);
-            });
-            bgCol->addWidget(lbl);
-            bgCol->addWidget(slider);
+        if (m_gameplay) {
+            m_gameplay->installEventFilter(this);
         }
 
-        // Размытие
-        {
-            auto *lbl = new QLabel(QStringLiteral("Размытие: %1 px").arg(m_gameplay->bgBlurRadius()), container);
-            lbl->setStyleSheet(Theme::secondaryLabelStyle());
-            auto *slider = new QSlider(Qt::Horizontal, container);
-            slider->setRange(0, 20);
-            slider->setValue(m_gameplay->bgBlurRadius());
-            slider->setStyleSheet(Theme::sliderStyle());
-            connect(slider, &QSlider::valueChanged, container, [this, lbl](int v) {
-                lbl->setText(QStringLiteral("Размытие: %1 px").arg(v));
-                m_gameplay->setBgBlurRadius(v);
-            });
-            bgCol->addWidget(lbl);
-            bgCol->addWidget(slider);
-        }
+        buildUi();
+    }
 
-        // Приглушение насыщенности
-        {
-            auto *lbl = new QLabel(QStringLiteral("Приглушение цвета: %1%").arg(m_gameplay->bgDesatPercent()), container);
-            lbl->setStyleSheet(Theme::secondaryLabelStyle());
-            auto *slider = new QSlider(Qt::Horizontal, container);
-            slider->setRange(0, 100);
-            slider->setValue(m_gameplay->bgDesatPercent());
-            slider->setStyleSheet(Theme::sliderStyle());
-            connect(slider, &QSlider::valueChanged, container, [this, lbl](int v) {
-                lbl->setText(QStringLiteral("Приглушение цвета: %1%").arg(v));
-                m_gameplay->setBgDesatPercent(v);
-            });
-            bgCol->addWidget(lbl);
-            bgCol->addWidget(slider);
+    ~InGamePauseDialog() override
+    {
+        if (m_gameplay) {
+            m_gameplay->removeEventFilter(this);
         }
-
-        // Виньетка
-        {
-            auto *lbl = new QLabel(QStringLiteral("Виньетка: %1%").arg(m_gameplay->bgVignettePercent()), container);
-            lbl->setStyleSheet(Theme::secondaryLabelStyle());
-            auto *slider = new QSlider(Qt::Horizontal, container);
-            slider->setRange(0, 100);
-            slider->setValue(m_gameplay->bgVignettePercent());
-            slider->setStyleSheet(Theme::sliderStyle());
-            connect(slider, &QSlider::valueChanged, container, [this, lbl](int v) {
-                lbl->setText(QStringLiteral("Виньетка: %1%").arg(v));
-                m_gameplay->setBgVignettePercent(v);
-            });
-            bgCol->addWidget(lbl);
-            bgCol->addWidget(slider);
-        }
-        bgCol->addStretch(1);
-        settingsColumnsLayout->addLayout(bgCol, 1);
-
-        innerLayout->addLayout(settingsColumnsLayout);
-        outerLayout->addWidget(container);
     }
 
     Action chosenAction() const { return m_action; }
 
 protected:
+    void showEvent(QShowEvent *event) override
+    {
+        QDialog::showEvent(event);
+        syncGeometryWithGameplay();
+    }
+
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QDialog::resizeEvent(event);
+        updatePositions();
+    }
+
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (watched == m_gameplay && event->type() == QEvent::Resize) {
+            syncGeometryWithGameplay();
+        }
+        return QDialog::eventFilter(watched, event);
+    }
+
+    void paintEvent(QPaintEvent *event) override
+    {
+        Q_UNUSED(event);
+        if (!m_isDraggingBgSlider) {
+            QPainter p(this);
+            p.fillRect(rect(), Theme::Colors::PauseOverlayDim);
+        }
+    }
+
     void keyPressEvent(QKeyEvent *event) override
     {
-        // По нажатию Esc окно закрывается и продолжается обратный отсчет так же, как кнопка "Продолжить"
         if (event->key() == Qt::Key_Escape) {
             m_action = ActionResume;
             accept();
@@ -241,7 +104,363 @@ protected:
     }
 
 private:
+    void syncGeometryWithGameplay()
+    {
+        if (!m_gameplay) return;
+        QPoint globalPos = m_gameplay->mapToGlobal(QPoint(0, 0));
+        setGeometry(globalPos.x(), globalPos.y(), m_gameplay->width(), m_gameplay->height());
+        updatePositions();
+    }
+
+    void updatePositions()
+    {
+        if (m_centerCard) {
+            int cx = (width() - m_centerCard->width()) / 2;
+            int cy = (height() - m_centerCard->height()) / 2;
+            m_centerCard->move(cx, cy);
+        }
+        if (m_bgCard) {
+            int bx = 28;
+            int by = height() - m_bgCard->height() - 28;
+            m_bgCard->move(bx, by);
+        }
+    }
+
+    void setBgPreviewMode(bool preview)
+    {
+        if (m_isDraggingBgSlider == preview) return;
+        m_isDraggingBgSlider = preview;
+        if (m_centerCard) {
+            m_centerCard->setVisible(!preview);
+        }
+        update();
+    }
+
+    void buildUi()
+    {
+        // 1. Центральная карточка: Заголовок "ПАУЗА", 3 кнопки и настройки звука
+        m_centerCard = new QWidget(this);
+        m_centerCard->setObjectName(QStringLiteral("pauseCenterCard"));
+        m_centerCard->setStyleSheet(Theme::pauseCenterCardStyle());
+        m_centerCard->setFixedSize(500, 340);
+
+        auto *shadow = new QGraphicsDropShadowEffect(m_centerCard);
+        shadow->setBlurRadius(30);
+        shadow->setColor(QColor(0, 0, 0, 200));
+        shadow->setOffset(0, 8);
+        m_centerCard->setGraphicsEffect(shadow);
+
+        auto *centerLayout = new QVBoxLayout(m_centerCard);
+        centerLayout->setContentsMargins(28, 22, 28, 24);
+        centerLayout->setSpacing(12);
+
+        auto *titleLabel = new QLabel(QStringLiteral("ПАУЗА"), m_centerCard);
+        titleLabel->setAlignment(Qt::AlignCenter);
+        titleLabel->setStyleSheet(Theme::dialogTitleStyle());
+        centerLayout->addWidget(titleLabel);
+
+        auto *buttonsLayout = new QHBoxLayout();
+        buttonsLayout->setSpacing(10);
+
+        auto *resumeBtn = new QPushButton(QStringLiteral("Продолжить"), m_centerCard);
+        resumeBtn->setCursor(Qt::PointingHandCursor);
+        resumeBtn->setStyleSheet(Theme::primaryButtonStyle());
+        resumeBtn->setFixedHeight(38);
+        connect(resumeBtn, &QPushButton::clicked, this, [this]() {
+            m_action = ActionResume;
+            accept();
+        });
+        buttonsLayout->addWidget(resumeBtn);
+
+        auto *retryBtn = new QPushButton(QStringLiteral("Начать заново"), m_centerCard);
+        retryBtn->setCursor(Qt::PointingHandCursor);
+        retryBtn->setStyleSheet(Theme::secondaryButtonStyle());
+        retryBtn->setFixedHeight(38);
+        connect(retryBtn, &QPushButton::clicked, this, [this]() {
+            m_action = ActionRestart;
+            accept();
+        });
+        buttonsLayout->addWidget(retryBtn);
+
+        auto *exitBtn = new QPushButton(QStringLiteral("К выбору карт"), m_centerCard);
+        exitBtn->setCursor(Qt::PointingHandCursor);
+        exitBtn->setStyleSheet(Theme::dangerButtonStyle());
+        exitBtn->setFixedHeight(38);
+        connect(exitBtn, &QPushButton::clicked, this, [this]() {
+            m_action = ActionExit;
+            accept();
+        });
+        buttonsLayout->addWidget(exitBtn);
+
+        centerLayout->addLayout(buttonsLayout);
+
+        auto *sep = new QFrame(m_centerCard);
+        sep->setFrameShape(QFrame::HLine);
+        sep->setStyleSheet(QStringLiteral("background: rgba(125, 68, 207, 120); max-height: 1px;"));
+        centerLayout->addWidget(sep);
+
+        auto *soundHeader = new QLabel(QStringLiteral("Настройки звука"), m_centerCard);
+        soundHeader->setStyleSheet(Theme::accentLabelStyle());
+        centerLayout->addWidget(soundHeader);
+
+        auto addSoundSliderRow = [&](const QString &name, int val, int minV, int maxV, auto onChange) {
+            auto *lbl = new QLabel(QStringLiteral("%1: %2%").arg(name).arg(val), m_centerCard);
+            lbl->setStyleSheet(Theme::secondaryLabelStyle());
+            auto *slider = new QSlider(Qt::Horizontal, m_centerCard);
+            slider->setRange(minV, maxV);
+            slider->setValue(val);
+            slider->setStyleSheet(Theme::sliderStyle());
+            connect(slider, &QSlider::valueChanged, m_centerCard, [lbl, name, onChange](int v) {
+                lbl->setText(QStringLiteral("%1: %2%").arg(name).arg(v));
+                onChange(v);
+            });
+            centerLayout->addWidget(lbl);
+            centerLayout->addWidget(slider);
+        };
+
+        auto &mgr = SettingsManager::instance();
+        addSoundSliderRow(QStringLiteral("Общая громкость"), mgr.masterVolume(), 0, 100, [&mgr](int v) {
+            mgr.setMasterVolume(v);
+        });
+        addSoundSliderRow(QStringLiteral("Музыка"), mgr.musicVolume(), 0, 100, [&mgr](int v) {
+            mgr.setMusicVolume(v);
+        });
+        addSoundSliderRow(QStringLiteral("Эффекты"), mgr.sfxVolume(), 0, 100, [&mgr](int v) {
+            mgr.setSfxVolume(v);
+        });
+
+        // 2. Карточка в левом нижнем углу: Настройки фона с почти прозрачным фоном
+        m_bgCard = new QWidget(this);
+        m_bgCard->setObjectName(QStringLiteral("pauseGlassCard"));
+        m_bgCard->setStyleSheet(Theme::pauseGlassCardStyle());
+        m_bgCard->setFixedSize(320, 240);
+
+        auto *bgShadow = new QGraphicsDropShadowEffect(m_bgCard);
+        bgShadow->setBlurRadius(20);
+        bgShadow->setColor(QColor(0, 0, 0, 140));
+        bgShadow->setOffset(0, 4);
+        m_bgCard->setGraphicsEffect(bgShadow);
+
+        auto *bgLayout = new QVBoxLayout(m_bgCard);
+        bgLayout->setContentsMargins(16, 12, 16, 14);
+        bgLayout->setSpacing(4);
+
+        auto *bgHeader = new QLabel(QStringLiteral("Отображение фона"), m_bgCard);
+        bgHeader->setStyleSheet(Theme::accentLabelStyle());
+        bgLayout->addWidget(bgHeader);
+
+        auto setupBgSlider = [this](QSlider *slider) {
+            connect(slider, &QSlider::sliderPressed, this, [this]() {
+                m_previewTimer->stop();
+                setBgPreviewMode(true);
+            });
+            connect(slider, &QSlider::sliderReleased, this, [this]() {
+                m_previewTimer->stop();
+                setBgPreviewMode(false);
+            });
+        };
+
+        // Затемнение
+        {
+            auto *lbl = new QLabel(QStringLiteral("Затемнение: %1%").arg(m_gameplay->bgDimPercent()), m_bgCard);
+            lbl->setStyleSheet(Theme::secondaryLabelStyle());
+            auto *slider = new QSlider(Qt::Horizontal, m_bgCard);
+            slider->setRange(0, 100);
+            slider->setValue(m_gameplay->bgDimPercent());
+            slider->setStyleSheet(Theme::sliderStyle());
+            setupBgSlider(slider);
+            connect(slider, &QSlider::valueChanged, m_bgCard, [this, lbl](int v) {
+                lbl->setText(QStringLiteral("Затемнение: %1%").arg(v));
+                m_gameplay->setBgDimPercent(v);
+                SettingsManager::instance().setBgDimPercent(v);
+                SettingsManager::instance().saveSettings();
+                if (!m_isDraggingBgSlider) {
+                    setBgPreviewMode(true);
+                }
+                m_previewTimer->start(600);
+            });
+            bgLayout->addWidget(lbl);
+            bgLayout->addWidget(slider);
+        }
+
+        // Размытие
+        {
+            auto *lbl = new QLabel(QStringLiteral("Размытие: %1 px").arg(m_gameplay->bgBlurRadius()), m_bgCard);
+            lbl->setStyleSheet(Theme::secondaryLabelStyle());
+            auto *slider = new QSlider(Qt::Horizontal, m_bgCard);
+            slider->setRange(0, 20);
+            slider->setValue(m_gameplay->bgBlurRadius());
+            slider->setStyleSheet(Theme::sliderStyle());
+            setupBgSlider(slider);
+            connect(slider, &QSlider::valueChanged, m_bgCard, [this, lbl](int v) {
+                lbl->setText(QStringLiteral("Размытие: %1 px").arg(v));
+                m_gameplay->setBgBlurRadius(v);
+                SettingsManager::instance().setBgBlurRadius(v);
+                SettingsManager::instance().saveSettings();
+                if (!m_isDraggingBgSlider) {
+                    setBgPreviewMode(true);
+                }
+                m_previewTimer->start(600);
+            });
+            bgLayout->addWidget(lbl);
+            bgLayout->addWidget(slider);
+        }
+
+        // Приглушение насыщенности
+        {
+            auto *lbl = new QLabel(QStringLiteral("Приглушение цвета: %1%").arg(m_gameplay->bgDesatPercent()), m_bgCard);
+            lbl->setStyleSheet(Theme::secondaryLabelStyle());
+            auto *slider = new QSlider(Qt::Horizontal, m_bgCard);
+            slider->setRange(0, 100);
+            slider->setValue(m_gameplay->bgDesatPercent());
+            slider->setStyleSheet(Theme::sliderStyle());
+            setupBgSlider(slider);
+            connect(slider, &QSlider::valueChanged, m_bgCard, [this, lbl](int v) {
+                lbl->setText(QStringLiteral("Приглушение цвета: %1%").arg(v));
+                m_gameplay->setBgDesatPercent(v);
+                if (!m_isDraggingBgSlider) {
+                    setBgPreviewMode(true);
+                }
+                m_previewTimer->start(600);
+            });
+            bgLayout->addWidget(lbl);
+            bgLayout->addWidget(slider);
+        }
+
+        // Виньетка
+        {
+            auto *lbl = new QLabel(QStringLiteral("Виньетка: %1%").arg(m_gameplay->bgVignettePercent()), m_bgCard);
+            lbl->setStyleSheet(Theme::secondaryLabelStyle());
+            auto *slider = new QSlider(Qt::Horizontal, m_bgCard);
+            slider->setRange(0, 100);
+            slider->setValue(m_gameplay->bgVignettePercent());
+            slider->setStyleSheet(Theme::sliderStyle());
+            setupBgSlider(slider);
+            connect(slider, &QSlider::valueChanged, m_bgCard, [this, lbl](int v) {
+                lbl->setText(QStringLiteral("Виньетка: %1%").arg(v));
+                m_gameplay->setBgVignettePercent(v);
+                if (!m_isDraggingBgSlider) {
+                    setBgPreviewMode(true);
+                }
+                m_previewTimer->start(600);
+            });
+            bgLayout->addWidget(lbl);
+            bgLayout->addWidget(slider);
+        }
+    }
+
     GameplayWidget *m_gameplay;
+    Action m_action;
+    bool m_isDraggingBgSlider;
+    QWidget *m_centerCard;
+    QWidget *m_bgCard;
+    QTimer *m_previewTimer;
+};
+
+// InGameFailDialog Implementation (TZ 4.7.9)
+// Диалоговое окно поражения при HP <= 0 с кнопками «Повторить» и «Выход в меню»
+// ============================================================================
+class InGameFailDialog : public QDialog
+{
+public:
+    enum Action { ActionRetry, ActionExit };
+
+    explicit InGameFailDialog(int score, double accuracy, int maxCombo, QWidget *parent = nullptr)
+        : QDialog(parent)
+        , m_action(ActionRetry)
+    {
+        setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+        setAttribute(Qt::WA_TranslucentBackground);
+        setModal(true);
+
+        auto *outerLayout = new QVBoxLayout(this);
+        outerLayout->setContentsMargins(20, 20, 20, 20);
+
+        auto *container = new QWidget(this);
+        container->setObjectName(QStringLiteral("failDialogContainer"));
+        container->setStyleSheet(Theme::failDialogContainerStyle());
+        container->setFixedSize(500, 310);
+
+        auto *shadow = new QGraphicsDropShadowEffect(this);
+        shadow->setBlurRadius(35);
+        shadow->setColor(QColor(0, 0, 0, 220));
+        shadow->setOffset(0, 8);
+        container->setGraphicsEffect(shadow);
+
+        auto *innerLayout = new QVBoxLayout(container);
+        innerLayout->setContentsMargins(32, 26, 32, 28);
+        innerLayout->setSpacing(16);
+
+        // 1. Заголовок "ПОРАЖЕНИЕ"
+        auto *titleLabel = new QLabel(QStringLiteral("ПОРАЖЕНИЕ"), container);
+        titleLabel->setAlignment(Qt::AlignCenter);
+        titleLabel->setStyleSheet(Theme::failDialogTitleStyle());
+        innerLayout->addWidget(titleLabel);
+
+        auto *subLabel = new QLabel(QStringLiteral("Уровень здоровья упал до 0 единиц"), container);
+        subLabel->setAlignment(Qt::AlignCenter);
+        subLabel->setStyleSheet(Theme::secondaryLabelStyle());
+        innerLayout->addWidget(subLabel);
+
+        // Блок статистики попытки
+        auto *statsLayout = new QHBoxLayout();
+        statsLayout->setSpacing(12);
+
+        auto createStatBox = [container](const QString &title, const QString &val) {
+            auto *box = new QWidget(container);
+            box->setStyleSheet(Theme::failStatBoxStyle());
+            auto *ly = new QVBoxLayout(box);
+            ly->setContentsMargins(10, 8, 10, 8);
+            ly->setSpacing(2);
+            auto *vLbl = new QLabel(val, box);
+            vLbl->setAlignment(Qt::AlignCenter);
+            vLbl->setStyleSheet(Theme::failStatValueStyle());
+            auto *tLbl = new QLabel(title, box);
+            tLbl->setAlignment(Qt::AlignCenter);
+            tLbl->setStyleSheet(Theme::failStatTitleStyle());
+            ly->addWidget(vLbl);
+            ly->addWidget(tLbl);
+            return box;
+        };
+
+        statsLayout->addWidget(createStatBox(QStringLiteral("СЧЕТ"), QString::number(score)));
+        statsLayout->addWidget(createStatBox(QStringLiteral("ТОЧНОСТЬ"), QString::asprintf("%.2f%%", accuracy)));
+        statsLayout->addWidget(createStatBox(QStringLiteral("МАКС. КОМБО"), QStringLiteral("%1x").arg(maxCombo)));
+        innerLayout->addLayout(statsLayout);
+
+        innerLayout->addStretch(1);
+
+        // 2. Кнопки: «Повторить» и «Выход в меню»
+        auto *buttonsLayout = new QHBoxLayout();
+        buttonsLayout->setSpacing(16);
+
+        auto *retryBtn = new QPushButton(QStringLiteral("Повторить"), container);
+        retryBtn->setCursor(Qt::PointingHandCursor);
+        retryBtn->setStyleSheet(Theme::primaryButtonStyle());
+        retryBtn->setFixedHeight(38);
+        connect(retryBtn, &QPushButton::clicked, this, [this]() {
+            m_action = ActionRetry;
+            accept();
+        });
+        buttonsLayout->addWidget(retryBtn);
+
+        auto *exitBtn = new QPushButton(QStringLiteral("Выход в меню"), container);
+        exitBtn->setCursor(Qt::PointingHandCursor);
+        exitBtn->setStyleSheet(Theme::secondaryButtonStyle());
+        exitBtn->setFixedHeight(38);
+        connect(exitBtn, &QPushButton::clicked, this, [this]() {
+            m_action = ActionExit;
+            accept();
+        });
+        buttonsLayout->addWidget(exitBtn);
+
+        innerLayout->addLayout(buttonsLayout);
+        outerLayout->addWidget(container, 0, Qt::AlignCenter);
+    }
+
+    Action chosenAction() const { return m_action; }
+
+private:
     Action m_action;
 };
 
@@ -257,14 +476,12 @@ GameplayWidget::GameplayWidget(QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
     setAttribute(Qt::WA_OpaquePaintEvent, false);
 
-    // Загрузка спрайта ноты из ресурсов и предварительное масштабирование для плавной отрисовки
-    m_notePixmap = QPixmap(QStringLiteral(":/assets/images/game_note.png"));
-    if (!m_notePixmap.isNull()) {
-        m_scaledNotePixmap = m_notePixmap.scaled(56, 36, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    }
+    // Загрузка текстур ноты и рамки зоны нажатия (скины из assets/ с fallback-ресурсами)
+    loadNoteTexture();
+    loadHitTargetTexture();
 
     m_gameLoopTimer->setTimerType(Qt::PreciseTimer);
-    m_gameLoopTimer->setInterval(16); // ~60 FPS с высокоточным таймером
+    m_gameLoopTimer->setInterval(1); // 1 ms высокоточный опрос для максимальной плавности под любую герцовку (60/144/240 Гц)
     connect(m_gameLoopTimer, &QTimer::timeout, this, &GameplayWidget::onGameTick);
 
     connect(m_countdownTimer, &QTimer::timeout, this, &GameplayWidget::onCountdownTick);
@@ -316,13 +533,22 @@ void GameplayWidget::startMap(const Beatmap &beatmap)
 
     m_clockBaseMs = 0;
     m_lastMediaPos = -1;
-    m_pausedElapsedMs = 0;
+    m_pausedElapsedMs = 0.0;
 
+    m_bgDimPercent = SettingsManager::instance().bgDimPercent();
+    m_bgBlurRadius = SettingsManager::instance().bgBlurRadius();
+
+    loadNoteTexture();
+    loadHitTargetTexture();
     updateTrackGeometry();
     updateCachedBackground();
 
-    // Запуск обратного отсчета перед началом матча (3.. 2.. 1..), чтобы игрок мог собраться
-    startResumeCountdown(3, true);
+    // Вступительная задержка в 1 секунду (1000 мс) перед стартом музыки:
+    // Ноты уже двигаются с правого края экрана, чтобы игрок успел подготовиться к первым нотам
+    m_isLeadIn = true;
+    m_leadInElapsedMs = 0;
+    m_leadInClock.restart();
+    m_lastRenderedTrackTimeMs = -1000.0;
 
     m_gameLoopTimer->start();
     setFocus();
@@ -334,10 +560,16 @@ void GameplayWidget::pauseGame()
     cancelCountdown();
     if (m_isPaused || m_isFinished || m_isFailed) return;
 
+    if (m_isLeadIn) {
+        m_leadInElapsedMs += (m_leadInClock.isValid() ? m_leadInClock.elapsed() : 0);
+        m_pausedElapsedMs = static_cast<double>(m_leadInElapsedMs - LEAD_IN_DURATION_MS);
+    } else {
+        m_pausedElapsedMs = currentTrackTimePreciseMs();
+        AudioManager::instance().pauseMusic();
+    }
+
     m_isPaused = true;
     m_gameLoopTimer->stop();
-    m_pausedElapsedMs = currentTrackTimeMs();
-    AudioManager::instance().pauseMusic();
     update();
 }
 
@@ -346,11 +578,17 @@ void GameplayWidget::resumeGame()
     if (!m_isPaused) return;
 
     m_isPaused = false;
-    m_audioElapsedTimer.restart();
-    m_audioClock.restart();
-    m_clockBaseMs = AudioManager::instance().currentPositionMs();
-    m_lastMediaPos = m_clockBaseMs;
-    AudioManager::instance().resumeMusic();
+    if (m_isLeadIn) {
+        m_leadInClock.restart();
+    } else {
+        double offset = static_cast<double>(SettingsManager::instance().audioOffsetMs());
+        m_audioElapsedTimer.restart();
+        m_audioClock.restart();
+        m_clockBaseMs = static_cast<qint64>(std::floor(m_pausedElapsedMs + offset));
+        m_lastMediaPos = m_clockBaseMs;
+        m_lastRenderedTrackTimeMs = m_pausedElapsedMs;
+        AudioManager::instance().resumeMusic();
+    }
     m_gameLoopTimer->start();
     update();
 }
@@ -364,38 +602,65 @@ void GameplayWidget::stopGame()
     m_floatingJudgments.clear();
     m_isFinished = true;
     m_isPaused = false;
-    m_isStartingCountdown = false;
+    m_isLeadIn = false;
+    m_leadInElapsedMs = 0;
+    m_lastRenderedTrackTimeMs = -999999.0;
     m_clockBaseMs = 0;
     m_lastMediaPos = -1;
-    m_pausedElapsedMs = 0;
+    m_pausedElapsedMs = 0.0;
 }
 
 qint64 GameplayWidget::currentTrackTimeMs() const
 {
-    if (m_isStartingCountdown) {
-        return 0;
-    }
+    return static_cast<qint64>(std::floor(currentTrackTimePreciseMs()));
+}
+
+double GameplayWidget::currentTrackTimePreciseMs() const
+{
     if (m_isPaused) {
-        return m_pausedElapsedMs;
+        return static_cast<double>(m_pausedElapsedMs);
     }
 
-    int offset = SettingsManager::instance().audioOffsetMs();
+    if (m_isLeadIn) {
+        double elapsed = static_cast<double>(m_leadInElapsedMs) +
+            (m_leadInClock.isValid() ? (m_leadInClock.nsecsElapsed() / 1000000.0) : 0.0);
+        if (elapsed < static_cast<double>(LEAD_IN_DURATION_MS)) {
+            double cur = elapsed - static_cast<double>(LEAD_IN_DURATION_MS);
+            if (cur < m_lastRenderedTrackTimeMs) cur = m_lastRenderedTrackTimeMs;
+            m_lastRenderedTrackTimeMs = cur;
+            return cur;
+        }
+        return 0.0;
+    }
+
+    double offset = static_cast<double>(SettingsManager::instance().audioOffsetMs());
 
     if (AudioManager::instance().isMusicPlaying()) {
         qint64 curPos = AudioManager::instance().currentPositionMs();
         if (curPos != m_lastMediaPos) {
             m_lastMediaPos = curPos;
-            m_clockBaseMs = curPos;
-            m_audioClock.restart();
+            double currentEst = static_cast<double>(m_clockBaseMs) +
+                (m_audioClock.isValid() ? (m_audioClock.nsecsElapsed() / 1000000.0) : 0.0);
+            double diff = static_cast<double>(curPos) - currentEst;
+            if (qAbs(diff) > 300.0) {
+                m_clockBaseMs = curPos;
+                m_audioClock.restart();
+            }
         }
-        qint64 elapsedSinceMediaUpdate = m_audioClock.isValid() ? m_audioClock.elapsed() : 0;
-        return (m_clockBaseMs + elapsedSinceMediaUpdate) - offset;
+        double elapsedSinceMediaUpdate = m_audioClock.isValid() ?
+            (m_audioClock.nsecsElapsed() / 1000000.0) : 0.0;
+        double curTime = (static_cast<double>(m_clockBaseMs) + elapsedSinceMediaUpdate) - offset;
+        if (curTime < m_lastRenderedTrackTimeMs) {
+            curTime = m_lastRenderedTrackTimeMs;
+        }
+        m_lastRenderedTrackTimeMs = curTime;
+        return curTime;
     }
 
     if (m_audioElapsedTimer.isValid()) {
-        return (m_pausedElapsedMs + m_audioElapsedTimer.elapsed()) - offset;
+        return static_cast<double>(m_pausedElapsedMs + m_audioElapsedTimer.elapsed()) - offset;
     }
-    return 0;
+    return 0.0;
 }
 
 void GameplayWidget::resizeEvent(QResizeEvent *event)
@@ -467,29 +732,26 @@ void GameplayWidget::updateCachedBackground()
 }
 
 NoteRenderObject GameplayWidget::getNoteRenderObject(const NoteData &note,
-                                                    qint64 currentTimeMs,
+                                                    double currentTimeMs,
                                                     const QRectF &trackRect,
                                                     qreal hitLineX) const
 {
     NoteRenderObject obj;
-    qint64 diffMs = note.timeMs - currentTimeMs;
+    double diffMs = static_cast<double>(note.timeMs) - currentTimeMs;
 
-    if (diffMs > m_travelTimeMs + 200 || diffMs < -200) {
+    if (diffMs > m_travelTimeMs + 200.0 || diffMs < -200.0) {
         obj.isVisible = false;
         return obj;
     }
 
-    qreal distance = trackRect.right() - hitLineX;
+    qreal distance = width() - hitLineX;
     qreal pixelsPerMs = distance / m_travelTimeMs;
     qreal x = hitLineX + (diffMs * pixelsPerMs);
 
-    const qreal noteWidth = 56.0;
-    const qreal noteHeight = 36.0;
-
-    obj.rect = QRectF(x - noteWidth / 2.0,
-                      trackRect.center().y() - noteHeight / 2.0,
-                      noteWidth,
-                      noteHeight);
+    obj.rect = QRectF(x - NOTE_WIDTH / 2.0,
+                      trackRect.center().y() - NOTE_HEIGHT / 2.0,
+                      NOTE_WIDTH,
+                      NOTE_HEIGHT);
     obj.pixmap = m_scaledNotePixmap.isNull() ? m_notePixmap : m_scaledNotePixmap;
     obj.isVisible = true;
     obj.opacity = 1.0;
@@ -502,16 +764,27 @@ void GameplayWidget::onGameTick()
         return;
     }
 
-    qint64 currentMs = currentTrackTimeMs();
-
-    if (!m_isStartingCountdown) {
-        checkAutoMisses(currentMs);
-        checkGameCompletion(currentMs);
+    if (m_isLeadIn) {
+        qint64 elapsed = m_leadInElapsedMs + (m_leadInClock.isValid() ? m_leadInClock.elapsed() : 0);
+        if (elapsed >= LEAD_IN_DURATION_MS) {
+            m_isLeadIn = false;
+            if (!m_beatmap.extractedAudioPath.isEmpty()) {
+                AudioManager::instance().stopMusic();
+                AudioManager::instance().playTrack(m_beatmap.extractedAudioPath, false);
+            }
+            m_clockBaseMs = 0;
+            m_lastMediaPos = -1;
+            m_audioClock.restart();
+            m_audioElapsedTimer.restart();
+            m_pausedElapsedMs = 0;
+        }
     }
 
-    // Затухание вспышки нажатия
-    if (m_keyPressGlow > 0.0) {
-        m_keyPressGlow = qMax(0.0, m_keyPressGlow - 0.08);
+    qint64 currentMs = currentTrackTimeMs();
+
+    if (!m_isLeadIn) {
+        checkAutoMisses(currentMs);
+        checkGameCompletion(currentMs);
     }
 
     // Анимация всплывающих надписей точности
@@ -528,15 +801,86 @@ void GameplayWidget::onGameTick()
     update();
 }
 
+void GameplayWidget::loadNoteTexture()
+{
+    m_notePixmap = QPixmap();
+
+    // Поиск пользовательского скина в каталогах assets/
+    QString appDir = QCoreApplication::applicationDirPath();
+    QStringList candidates = {
+        appDir + QStringLiteral("/assets/note.png"),
+        appDir + QStringLiteral("/assets/skins/note.png"),
+        appDir + QStringLiteral("/assets/images/game_note.png"),
+        QDir::currentPath() + QStringLiteral("/assets/note.png"),
+        QStringLiteral(":/assets/images/game_note.png")
+    };
+
+    for (const QString &path : candidates) {
+        if (QFile::exists(path)) {
+            QPixmap pm(path);
+            if (!pm.isNull()) {
+                m_notePixmap = pm;
+                break;
+            }
+        }
+    }
+
+    if (!m_notePixmap.isNull()) {
+        m_scaledNotePixmap = m_notePixmap.scaled(NOTE_WIDTH, NOTE_HEIGHT, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    } else {
+        m_scaledNotePixmap = QPixmap();
+    }
+}
+
+void GameplayWidget::loadHitTargetTexture()
+{
+    m_hitTargetPixmap = QPixmap();
+
+    // Поиск пользовательского скина рамки зоны нажатия в каталогах assets/
+    QString appDir = QCoreApplication::applicationDirPath();
+    QStringList candidates = {
+        appDir + QStringLiteral("/assets/hit_target.png"),
+        appDir + QStringLiteral("/assets/target.png"),
+        appDir + QStringLiteral("/assets/skins/hit_target.png"),
+        appDir + QStringLiteral("/assets/images/hit_target.png"),
+        QDir::currentPath() + QStringLiteral("/assets/hit_target.png"),
+        QDir::currentPath() + QStringLiteral("/assets/target.png"),
+        QStringLiteral(":/assets/images/hit_target.png")
+    };
+
+    for (const QString &path : candidates) {
+        if (QFile::exists(path)) {
+            QPixmap pm(path);
+            if (!pm.isNull()) {
+                m_hitTargetPixmap = pm;
+                break;
+            }
+        }
+    }
+
+    if (!m_hitTargetPixmap.isNull()) {
+        m_scaledHitTargetPixmap = m_hitTargetPixmap.scaled(NOTE_WIDTH, NOTE_HEIGHT, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+    } else {
+        m_scaledHitTargetPixmap = QPixmap();
+    }
+}
+
 void GameplayWidget::handleHitAction()
 {
-    if (m_isPaused || m_isFinished || m_isFailed || m_isStartingCountdown) {
+    if (m_isPaused || m_isFinished || m_isFailed || m_isCountingDown) {
         return;
     }
 
-    m_keyPressGlow = 1.0;
-
     qint64 currentMs = currentTrackTimeMs();
+
+    // 4.7.1.2. Вступительный период: за 100 мс до момента первой ноты нажатия игнорируются
+    if (!m_notes.isEmpty()) {
+        int firstNoteTime = m_notes[0].data.timeMs;
+        if (currentMs < firstNoteTime - 100) {
+            return;
+        }
+    }
+
     int bestIndex = -1;
     qint64 bestDiff = 999999;
 
@@ -549,7 +893,8 @@ void GameplayWidget::handleHitAction()
         }
     }
 
-    if (bestIndex != -1 && bestDiff <= 120) {
+    // 4.7.3. Окна точности (<= 100 мс)
+    if (bestIndex != -1 && bestDiff <= 100) {
         m_notes[bestIndex].isHit = true;
         AudioManager::instance().playHitSound();
 
@@ -561,40 +906,27 @@ void GameplayWidget::handleHitAction()
         if (bestDiff <= 25) {
             m_count300++;
             baseScore = 300;
-            hpDelta = 4;
-            text = QStringLiteral("ИДЕАЛЬНО!");
+            hpDelta = 2; // +2 HP по ТЗ 4.7.3.1
+            text = QStringLiteral("ИДЕАЛЬНО");
             color = Theme::Colors::AccentPurpleLight;
         } else if (bestDiff <= 50) {
             m_count200++;
             baseScore = 200;
-            hpDelta = 2;
+            hpDelta = 1; // +1 HP по ТЗ 4.7.3.2
             text = QStringLiteral("ХОРОШО");
             color = Theme::Colors::Success;
-        } else if (bestDiff <= 100) {
+        } else {
             m_count100++;
             baseScore = 100;
-            hpDelta = 0;
+            hpDelta = 0; // 0 HP по ТЗ 4.7.3.3
             text = QStringLiteral("СОЙДЕТ");
             color = Theme::Colors::Warning;
-        } else {
-            m_countMiss++;
-            baseScore = 0;
-            hpDelta = -6;
-            text = QStringLiteral("ПРОМАХ");
-            color = Theme::Colors::Danger;
         }
 
-        if (baseScore > 0) {
-            m_combo++;
-            if (m_combo > m_maxCombo) m_maxCombo = m_combo;
-            int comboMultiplier = 1 + std::min(m_combo, 100) / 25;
-            m_score += baseScore * comboMultiplier;
-        } else {
-            if (m_combo >= 5) {
-                AudioManager::instance().playComboBreakSound();
-            }
-            m_combo = 0;
-        }
+        m_combo++;
+        if (m_combo > m_maxCombo) m_maxCombo = m_combo;
+        int comboMultiplier = 1 + std::min(m_combo, 100) / 25;
+        m_score += baseScore * comboMultiplier;
 
         m_hp = qBound(0, m_hp + hpDelta, 100);
         spawnFloatingJudgment(text, color);
@@ -603,16 +935,14 @@ void GameplayWidget::handleHitAction()
             finishGame(true);
         }
     } else {
-        // Удар в пустоту / нажатие без ноты в зоне удара - штраф (ПРОМАХ)
-        m_countMiss++;
+        // 4.7.5. Защита от спама клавиш вне зоны активных нот: -5 HP, сброс комбо, miss.wav
         if (m_combo >= 5) {
             AudioManager::instance().playComboBreakSound();
         }
         m_combo = 0;
-        m_hp = qBound(0, m_hp - 6, 100);
+        m_hp = qMax(0, m_hp - 5);
         spawnFloatingJudgment(QStringLiteral("ПРОМАХ"), Theme::Colors::Danger);
         AudioManager::instance().playMissSound();
-        m_keyPressGlow = 0.5;
 
         if (m_hp <= 0) {
             finishGame(true);
@@ -631,8 +961,9 @@ void GameplayWidget::checkAutoMisses(qint64 currentMs)
                     AudioManager::instance().playComboBreakSound();
                 }
                 m_combo = 0;
-                m_hp = qBound(0, m_hp - 6, 100);
+                m_hp = qMax(0, m_hp - 5); // Списание 5 HP по ТЗ 4.7.3.4
                 spawnFloatingJudgment(QStringLiteral("ПРОМАХ"), Theme::Colors::Danger);
+                AudioManager::instance().playMissSound();
 
                 if (m_hp <= 0) {
                     finishGame(true);
@@ -668,6 +999,29 @@ void GameplayWidget::finishGame(bool failed)
     m_gameLoopTimer->stop();
     AudioManager::instance().stopMusic();
 
+    int totalHits = m_count300 + m_count200 + m_count100 + m_countMiss;
+    double accuracy = 0.0;
+    if (totalHits > 0) {
+        accuracy = ((300.0 * m_count300 + 200.0 * m_count200 + 100.0 * m_count100) / (300.0 * totalHits)) * 100.0;
+    }
+
+    if (failed) {
+        AudioManager::instance().playFailSound();
+
+        // 4.7.9. Диалоговое окно поражения при HP <= 0 («Повторить» / «Выход в меню»)
+        InGameFailDialog dialog(m_score, accuracy, m_maxCombo, this);
+        dialog.exec();
+
+        if (dialog.chosenAction() == InGameFailDialog::ActionRetry) {
+            startMap(m_beatmap);
+        } else {
+            stopGame();
+            emit exitRequested();
+        }
+        return;
+    }
+
+    // 4.7.9. Успешное завершение раунда (Clear):
     GameResult result;
     result.beatmap = m_beatmap;
     result.score = m_score;
@@ -676,28 +1030,25 @@ void GameplayWidget::finishGame(bool failed)
     result.count200 = m_count200;
     result.count100 = m_count100;
     result.countMiss = m_countMiss;
-    result.isClear = !failed;
+    result.isClear = true;
+    result.accuracy = accuracy;
 
-    int totalHits = m_count300 + m_count200 + m_count100 + m_countMiss;
-    if (totalHits > 0) {
-        result.accuracy = ((300.0 * m_count300 + 200.0 * m_count200 + 100.0 * m_count100) / (300.0 * totalHits)) * 100.0;
+    // 4.7.10. Градация рангов мастерства
+    if (m_count200 == 0 && m_count100 == 0 && m_countMiss == 0 && result.accuracy >= 99.999) {
+        result.rank = QStringLiteral("SS");
+    } else if (result.accuracy >= 95.0 && m_countMiss == 0) {
+        result.rank = QStringLiteral("S");
+    } else if (result.accuracy >= 90.0) {
+        result.rank = QStringLiteral("A");
+    } else if (result.accuracy >= 80.0) {
+        result.rank = QStringLiteral("B");
+    } else if (result.accuracy >= 70.0) {
+        result.rank = QStringLiteral("C");
     } else {
-        result.accuracy = 0.0;
+        result.rank = QStringLiteral("D");
     }
 
-    if (failed) {
-        result.rank = QStringLiteral("FAIL");
-        AudioManager::instance().playFailSound();
-    } else {
-        if (result.accuracy >= 98.0 && m_countMiss == 0) result.rank = QStringLiteral("SS");
-        else if (result.accuracy >= 95.0 && m_countMiss == 0) result.rank = QStringLiteral("S");
-        else if (result.accuracy >= 90.0) result.rank = QStringLiteral("A");
-        else if (result.accuracy >= 80.0) result.rank = QStringLiteral("B");
-        else if (result.accuracy >= 70.0) result.rank = QStringLiteral("C");
-        else result.rank = QStringLiteral("D");
-        AudioManager::instance().playClearSound();
-    }
-
+    AudioManager::instance().playClearSound();
     emit gameplayFinished(result);
 }
 
@@ -707,7 +1058,7 @@ void GameplayWidget::keyPressEvent(QKeyEvent *event)
         return;
     }
 
-    if (m_isCountingDown || m_isStartingCountdown) {
+    if (m_isCountingDown) {
         if (event->key() == Qt::Key_Escape) {
             cancelCountdown();
             showPauseDialog();
@@ -725,6 +1076,11 @@ void GameplayWidget::keyPressEvent(QKeyEvent *event)
     Qt::Key secondary = SettingsManager::instance().secondaryKey();
 
     if (SettingsManager::isKeyMatching(event, primary) || SettingsManager::isKeyMatching(event, secondary)) {
+        qint64 curMs = currentTrackTimeMs();
+        // Вступительный период (ТЗ 4.2): игнорирование нажатий и защита от штрафов
+        if (curMs < -100) {
+            return;
+        }
         handleHitAction();
         return;
     }
@@ -739,10 +1095,8 @@ void GameplayWidget::showPauseDialog()
     InGamePauseDialog dialog(this, this);
     dialog.exec();
 
-    // Независимо от того, нажата ли кнопка "Продолжить" или Esc,
-    // игра возобновляется с обратным отсчетом
     if (dialog.chosenAction() == InGamePauseDialog::ActionResume) {
-        startResumeCountdown(3, false);
+        startResumeCountdown(3);
     } else if (dialog.chosenAction() == InGamePauseDialog::ActionRestart) {
         startMap(m_beatmap);
     } else if (dialog.chosenAction() == InGamePauseDialog::ActionExit) {
@@ -751,11 +1105,9 @@ void GameplayWidget::showPauseDialog()
     }
 }
 
-void GameplayWidget::startResumeCountdown(int count, bool isInitial)
+void GameplayWidget::startResumeCountdown(int count)
 {
     m_isCountingDown = true;
-    m_isInitialCountdown = isInitial;
-    m_isStartingCountdown = isInitial;
     m_countdownNumber = count;
     AudioManager::instance().playClickSound();
     m_countdownTimer->start(800);
@@ -776,21 +1128,7 @@ void GameplayWidget::onCountdownTick()
     m_countdownNumber--;
     if (m_countdownNumber <= 0) {
         cancelCountdown();
-        if (m_isInitialCountdown) {
-            m_isInitialCountdown = false;
-            m_isStartingCountdown = false;
-            if (!m_beatmap.extractedAudioPath.isEmpty()) {
-                AudioManager::instance().stopMusic();
-                AudioManager::instance().playTrack(m_beatmap.extractedAudioPath, false);
-            }
-            m_audioElapsedTimer.restart();
-            m_audioClock.restart();
-            m_clockBaseMs = 0;
-            m_lastMediaPos = -1;
-            m_pausedElapsedMs = 0;
-        } else {
-            resumeGame();
-        }
+        resumeGame();
     } else {
         AudioManager::instance().playClickSound();
         update();
@@ -825,58 +1163,53 @@ void GameplayWidget::paintEvent(QPaintEvent *event)
         Theme::paintWindowBackground(&painter, rect());
     }
 
-    qint64 currentMs = currentTrackTimeMs();
+    double currentPreciseMs = currentTrackTimePreciseMs();
+    qint64 currentMs = static_cast<qint64>(std::floor(currentPreciseMs));
 
-    // 2. Отрисовка горизонтальной дорожки нот
-    QLinearGradient trackGrad(m_trackRect.topLeft(), m_trackRect.bottomLeft());
-    trackGrad.setColorAt(0.0, QColor(26, 16, 48, 170));
-    trackGrad.setColorAt(0.5, QColor(36, 22, 66, 200));
-    trackGrad.setColorAt(1.0, QColor(26, 16, 48, 170));
-    painter.setBrush(trackGrad);
-    painter.setPen(QPen(QColor(125, 68, 207, 140), 1.5));
-    painter.drawRoundedRect(m_trackRect, 10, 10);
+    // 2. Горизонтальная белая полоска от края до края экрана (вместо фиолетового фона дорожки)
+    qreal centerY = m_trackRect.center().y();
+    painter.setPen(QPen(Theme::Colors::TrackLineWhite, 1.5, Qt::SolidLine, Qt::FlatCap));
+    painter.drawLine(QPointF(0, centerY), QPointF(width(), centerY));
 
-    // Внутренняя центральная пунктирная линия дорожки
-    painter.setPen(QPen(QColor(125, 68, 207, 90), 1.0, Qt::DashLine));
-    painter.drawLine(QPointF(m_trackRect.left() + 10, m_trackRect.center().y()),
-                     QPointF(m_trackRect.right() - 10, m_trackRect.center().y()));
+    // 3. Рамка зоны нажатия (полый прямоугольник той же формы, что и нота)
+    QRectF hitTargetRect(m_hitLineX - NOTE_WIDTH / 2.0,
+                         centerY - NOTE_HEIGHT / 2.0,
+                         NOTE_WIDTH,
+                         NOTE_HEIGHT);
 
-    // 3. Линия нажатия (без внешней обводки/рамки)
-    QColor hitLineColor = (m_keyPressGlow > 0.0) ? QColor(255, 255, 255) : QColor(187, 154, 247, 180);
-    qreal hitLineWidth = (m_keyPressGlow > 0.0) ? 3.5 : 2.0;
-
-    // Вспышка свечения вдоль линии при нажатии
-    if (m_keyPressGlow > 0.0) {
-        QColor glowColor(0, 229, 255, static_cast<int>(150 * m_keyPressGlow));
-        painter.setPen(QPen(glowColor, 8.0, Qt::SolidLine, Qt::RoundCap));
-        painter.drawLine(QPointF(m_hitLineX, m_trackRect.top() + 4),
-                         QPointF(m_hitLineX, m_trackRect.bottom() - 4));
+    if (!m_scaledHitTargetPixmap.isNull()) {
+        painter.drawPixmap(hitTargetRect, m_scaledHitTargetPixmap, m_scaledHitTargetPixmap.rect());
+    } else {
+        // Векторный fallback: пустой внутри прямоугольник с закругленными углами
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(Theme::Colors::HitTargetBorder, 2.0));
+        painter.drawRoundedRect(hitTargetRect, 6, 6);
     }
 
-    painter.setPen(QPen(hitLineColor, hitLineWidth, Qt::SolidLine, Qt::RoundCap));
-    painter.drawLine(QPointF(m_hitLineX, m_trackRect.top() + 4),
-                     QPointF(m_hitLineX, m_trackRect.bottom() - 4));
-
-    // Подсказка назначенных клавиш под линией
+    // Подсказка назначенных клавиш под полым прямоугольником
     QString keyText = QStringLiteral("%1 / %2")
         .arg(SettingsManager::keyToString(SettingsManager::instance().primaryKey()),
              SettingsManager::keyToString(SettingsManager::instance().secondaryKey()));
     painter.setFont(QFont(QStringLiteral("Segoe UI"), 11, QFont::Bold));
-    painter.setPen(QColor(187, 154, 247));
-    painter.drawText(QRectF(m_hitLineX - 60, m_trackRect.bottom() + 8, 120, 24), Qt::AlignCenter, keyText);
+    painter.setPen(Theme::Colors::AccentPurpleLight);
+    painter.drawText(QRectF(m_hitLineX - 60, centerY + NOTE_HEIGHT / 2.0 + 8, 120, 24), Qt::AlignCenter, keyText);
 
     // 4. Отрисовка летящих нот (вызов единой функции getNoteRenderObject со спрайтом из ресурсов)
     for (const auto &note : m_notes) {
         if (note.isHit) continue;
 
-        NoteRenderObject obj = getNoteRenderObject(note.data, currentMs, m_trackRect, m_hitLineX);
+        NoteRenderObject obj = getNoteRenderObject(note.data, currentPreciseMs, m_trackRect, m_hitLineX);
         if (!obj.isVisible) continue;
 
         if (!obj.pixmap.isNull()) {
-            painter.drawPixmap(obj.rect.topLeft(), obj.pixmap);
+            painter.drawPixmap(obj.rect, obj.pixmap, obj.pixmap.rect());
         } else {
-            painter.setBrush(QColor(0, 229, 255));
-            painter.setPen(QPen(QColor(255, 255, 255), 2.0));
+            // Векторный fallback-рендеринг ноты
+            QLinearGradient grad(obj.rect.topLeft(), obj.rect.bottomLeft());
+            grad.setColorAt(0.0, Theme::Colors::NoteCyan);
+            grad.setColorAt(1.0, Theme::Colors::NoteCyanDark);
+            painter.setBrush(grad);
+            painter.setPen(QPen(Theme::Colors::TextPrimary, 2.0));
             painter.drawRoundedRect(obj.rect, 6, 6);
         }
     }
@@ -892,7 +1225,7 @@ void GameplayWidget::paintEvent(QPaintEvent *event)
         painter.setPen(textColor);
 
         QRectF textRect(m_hitLineX - 80,
-                        m_trackRect.top() - 36 - fj.yOffset,
+                        centerY - NOTE_HEIGHT / 2.0 - 24 - fj.yOffset,
                         160,
                         30);
         painter.drawText(textRect, Qt::AlignCenter, fj.text);
@@ -905,12 +1238,22 @@ void GameplayWidget::paintEvent(QPaintEvent *event)
     painter.drawText(40, 42, m_beatmap.meta.title.isEmpty() ? QStringLiteral("BeatKey Track") : m_beatmap.meta.title);
 
     painter.setFont(QFont(QStringLiteral("Segoe UI"), 11));
-    painter.setPen(QColor(160, 156, 176));
+    painter.setPen(Theme::Colors::TextMuted);
     QString subtitle = QStringLiteral("%1 | %2 | BPM %3")
         .arg(m_beatmap.meta.artist.isEmpty() ? QStringLiteral("Unknown") : m_beatmap.meta.artist,
              m_beatmap.meta.difficultyName.isEmpty() ? QStringLiteral("Normal") : m_beatmap.meta.difficultyName)
         .arg(static_cast<int>(m_beatmap.meta.bpm));
     painter.drawText(40, 64, subtitle);
+
+    // Прогресс-бар прохождения трека (п. 4.7.6 ТЗ)
+    qint64 totalMs = qMax(static_cast<qint64>(1), static_cast<qint64>(m_lastNoteTimeMs + 1000));
+    qreal progress = qBound(0.0, static_cast<double>(currentMs) / totalMs, 1.0);
+    QRectF progBg(40, 76, width() - 80, 3);
+    painter.fillRect(progBg, Theme::Colors::TrackProgressBarBg);
+    if (progress > 0.0) {
+        QRectF progFill(40, 76, (width() - 80) * progress, 3);
+        painter.fillRect(progFill, Theme::Colors::AccentPurple);
+    }
 
     // Центр: Счет и Точность
     painter.setFont(QFont(QStringLiteral("Segoe UI"), 22, QFont::Bold));
@@ -961,30 +1304,31 @@ void GameplayWidget::paintEvent(QPaintEvent *event)
     // 7. Комбо-счетчик
     if (m_combo > 0) {
         painter.setFont(QFont(QStringLiteral("Segoe UI"), 24, QFont::Black));
-        painter.setPen(QColor(255, 255, 255));
-        painter.drawText(QRectF(m_hitLineX - 100, m_trackRect.top() - 75, 200, 32), Qt::AlignCenter,
+        painter.setPen(Theme::Colors::TextPrimary);
+        painter.drawText(QRectF(m_hitLineX - 100, centerY - NOTE_HEIGHT / 2.0 - 75, 200, 32), Qt::AlignCenter,
                          QStringLiteral("%1x").arg(m_combo));
 
         painter.setFont(QFont(QStringLiteral("Segoe UI"), 10, QFont::Bold));
-        painter.setPen(QColor(187, 154, 247));
-        painter.drawText(QRectF(m_hitLineX - 100, m_trackRect.top() - 48, 200, 18), Qt::AlignCenter,
+        painter.setPen(Theme::Colors::AccentPurpleLight);
+        painter.drawText(QRectF(m_hitLineX - 100, centerY - NOTE_HEIGHT / 2.0 - 48, 200, 18), Qt::AlignCenter,
                          QStringLiteral("КОМБО"));
     }
 
-    // 8. Отрисовка обратного отсчета (при старте трека и при возврате из паузы)
+    // 8. Отрисовка обратного отсчета (только при продолжении игры после паузы)
     if (m_isCountingDown) {
-        painter.fillRect(rect(), QColor(16, 10, 28, 175));
+        // Полупрозрачное затемнение (ноты и дорожка видны сквозь него)
+        painter.fillRect(rect(), Theme::Colors::CountdownOverlayDim);
 
         QPointF center = rect().center();
         qreal radius = 65.0;
 
-        // Круговой бейдж с неоновым контуром
-        painter.setPen(QPen(QColor(187, 154, 247), 3));
-        painter.setBrush(QColor(26, 16, 48, 240));
+        // Круговой бейдж с мягкой полупрозрачностью
+        painter.setPen(QPen(Theme::Colors::CountdownBadgeBorder, 2.5));
+        painter.setBrush(Theme::Colors::CountdownBadgeBg);
         painter.drawEllipse(center, radius, radius);
 
         // Число обратного отсчета
-        painter.setPen(QColor(255, 255, 255));
+        painter.setPen(QColor(255, 255, 255, 220));
         QFont countFont(QStringLiteral("Segoe UI"), 42, QFont::Black);
         painter.setFont(countFont);
 
@@ -993,10 +1337,23 @@ void GameplayWidget::paintEvent(QPaintEvent *event)
         painter.drawText(numRect, Qt::AlignCenter, countStr);
 
         // Подпись под кругом
-        painter.setPen(QColor(187, 154, 247));
+        painter.setPen(QColor(187, 154, 247, 200));
         QFont hintFont(QStringLiteral("Segoe UI"), 13, QFont::DemiBold);
         painter.setFont(hintFont);
         QRectF hintRect(center.x() - 150, center.y() + radius + 15, 300, 30);
         painter.drawText(hintRect, Qt::AlignCenter, QStringLiteral("Приготовьтесь..."));
+    }
+
+
+    // 9. Вступительное затемнение при старте: экран темный в первой половине секунды (-1000..-500мс)
+    // и затем плавно осветляется за 0.5 секунды (-500..0мс)
+    // Кинематографический старт: мягкое затемнение в начале (-1000..-500мс)
+    // Не полное (полупрозрачное, макс. 110 из 255), плавно осветляется вдвое быстрее за ~0.5 с
+    if (currentPreciseMs < -500.0) {
+        double t = (-currentPreciseMs - 500.0) / 500.0;
+        int fadeAlpha = qBound(0, static_cast<int>(t * 110.0), 110);
+        if (fadeAlpha > 0) {
+            painter.fillRect(rect(), QColor(10, 6, 20, fadeAlpha));
+        }
     }
 }

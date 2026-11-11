@@ -23,6 +23,8 @@ SettingsManager::SettingsManager(QObject *parent)
     , m_fullscreen(DEFAULT_FULLSCREEN)
     , m_windowWidth(1280)
     , m_windowHeight(720)
+    , m_bgDimPercent(DEFAULT_BG_DIM_PERCENT)
+    , m_bgBlurRadius(DEFAULT_BG_BLUR_RADIUS)
 {
     QString appDir = QCoreApplication::applicationDirPath();
     m_configPath = appDir + QDir::separator() + QStringLiteral("settings.ini");
@@ -68,6 +70,10 @@ void SettingsManager::loadSettings()
     m_windowWidth = settings.value(QStringLiteral("Video/WindowWidth"), 1280).toInt();
     m_windowHeight = settings.value(QStringLiteral("Video/WindowHeight"), 720).toInt();
 
+    // Graphics Background Display
+    m_bgDimPercent = std::clamp(settings.value(QStringLiteral("Graphics/BgDim"), DEFAULT_BG_DIM_PERCENT).toInt(), 0, 100);
+    m_bgBlurRadius = std::clamp(settings.value(QStringLiteral("Graphics/BgBlur"), DEFAULT_BG_BLUR_RADIUS).toInt(), 0, 20);
+
     qDebug() << "[SettingsManager] Loaded config from" << m_configPath
              << "| Nickname:" << m_nickname
              << "| PrimaryKey:" << keyToString(m_primaryKey)
@@ -93,6 +99,9 @@ void SettingsManager::saveSettings()
     settings.setValue(QStringLiteral("Video/WindowWidth"), m_windowWidth);
     settings.setValue(QStringLiteral("Video/WindowHeight"), m_windowHeight);
 
+    settings.setValue(QStringLiteral("Graphics/BgDim"), m_bgDimPercent);
+    settings.setValue(QStringLiteral("Graphics/BgBlur"), m_bgBlurRadius);
+
     settings.sync();
     qDebug() << "[SettingsManager] Settings successfully saved to" << m_configPath;
     emit settingsSaved();
@@ -110,6 +119,8 @@ void SettingsManager::resetToDefaults()
     m_fullscreen = DEFAULT_FULLSCREEN;
     m_windowWidth = 1280;
     m_windowHeight = 720;
+    m_bgDimPercent = DEFAULT_BG_DIM_PERCENT;
+    m_bgBlurRadius = DEFAULT_BG_BLUR_RADIUS;
 
     saveSettings();
 
@@ -118,6 +129,8 @@ void SettingsManager::resetToDefaults()
     emit musicVolumeChanged(m_musicVolume);
     emit sfxVolumeChanged(m_sfxVolume);
     emit audioOffsetChanged(m_audioOffsetMs);
+    emit bgDimPercentChanged(m_bgDimPercent);
+    emit bgBlurRadiusChanged(m_bgBlurRadius);
     emit keyBindingsChanged(m_primaryKey, m_secondaryKey);
     emit fullscreenChanged(m_fullscreen);
     emit settingsReset();
@@ -349,4 +362,32 @@ bool SettingsManager::isKeyMatching(const QKeyEvent *event, Qt::Key expectedKey)
         return true;
     }
     return false;
+}
+
+int SettingsManager::bgDimPercent() const
+{
+    return m_bgDimPercent;
+}
+
+void SettingsManager::setBgDimPercent(int percent)
+{
+    percent = std::clamp(percent, 0, 100);
+    if (m_bgDimPercent != percent) {
+        m_bgDimPercent = percent;
+        emit bgDimPercentChanged(m_bgDimPercent);
+    }
+}
+
+int SettingsManager::bgBlurRadius() const
+{
+    return m_bgBlurRadius;
+}
+
+void SettingsManager::setBgBlurRadius(int radius)
+{
+    radius = std::clamp(radius, 0, 20);
+    if (m_bgBlurRadius != radius) {
+        m_bgBlurRadius = radius;
+        emit bgBlurRadiusChanged(m_bgBlurRadius);
+    }
 }

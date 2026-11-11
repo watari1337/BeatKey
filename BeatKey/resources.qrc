@@ -6,6 +6,7 @@
         <file>assets/images/logo.png</file>
         <file>assets/images/icon_bk.png</file>
         <file>assets/images/game_note.png</file>
+        <file>assets/images/hit_target.png</file>
         <file>assets/audio/hit.wav</file>
         <file>assets/audio/miss.wav</file>
         <file>assets/audio/combo_break.wav</file>

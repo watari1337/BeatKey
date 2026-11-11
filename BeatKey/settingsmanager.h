@@ -31,6 +31,8 @@ public:
     static constexpr Qt::Key DEFAULT_SECONDARY_KEY = Qt::Key_K;
     static inline const QString DEFAULT_NICKNAME = QStringLiteral("Player");
     static constexpr bool DEFAULT_FULLSCREEN = false;
+    static constexpr int DEFAULT_BG_DIM_PERCENT = 50;
+    static constexpr int DEFAULT_BG_BLUR_RADIUS = 0;
 
     // Load / Save
     void loadSettings();
@@ -69,6 +71,13 @@ public:
     int windowHeight() const;
     void setWindowResolution(int width, int height);
 
+    // Background Display
+    int bgDimPercent() const;
+    void setBgDimPercent(int percent);
+
+    int bgBlurRadius() const;
+    void setBgBlurRadius(int radius);
+
     // Helpers
     static QString keyToString(Qt::Key key);
     static Qt::Key stringToKey(const QString &str);
@@ -84,6 +93,8 @@ signals:
     void audioOffsetChanged(int offsetMs);
     void keyBindingsChanged(Qt::Key primary, Qt::Key secondary);
     void fullscreenChanged(bool fullscreen);
+    void bgDimPercentChanged(int percent);
+    void bgBlurRadiusChanged(int radius);
     void settingsReset();
     void settingsSaved();
 
@@ -106,6 +117,8 @@ private:
     bool m_fullscreen;
     int m_windowWidth;
     int m_windowHeight;
+    int m_bgDimPercent;
+    int m_bgBlurRadius;
 };
 
 #endif // SETTINGSMANAGER_H

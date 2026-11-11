@@ -17,8 +17,8 @@ EditorTimelineCanvas::EditorTimelineCanvas(QWidget *parent)
     , m_audioOffsetMs(0)
     , m_quantDivisor(4) // Default 1/4 measure (quarter beat in standard 4/4)
     , m_totalDurationMs(120000)
-    , m_currentTimeMs(0)
-    , m_scrollTimeMs(0)
+    , m_currentTimeMs(0.0)
+    , m_scrollTimeMs(0.0)
     , m_waveform(nullptr)
     , m_activeTool(EditorTool::Place)
     , m_lastClickedIndex(-1)
@@ -27,7 +27,7 @@ EditorTimelineCanvas::EditorTimelineCanvas(QWidget *parent)
     , m_isMarqueeSelecting(false)
     , m_isPanning(false)
     , m_panStartMouseX(0.0)
-    , m_panStartScrollTime(0)
+    , m_panStartScrollTime(0.0)
     , m_dragPending(false)
     , m_isDraggingNotes(false)
     , m_dragAnchorTimeMs(0)
@@ -41,6 +41,9 @@ EditorTimelineCanvas::EditorTimelineCanvas(QWidget *parent)
     setMinimumHeight(260);
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
+
+    m_edgeScrollTimer = new QTimer(this);
+    connect(m_edgeScrollTimer, &QTimer::timeout, this, &EditorTimelineCanvas::onEdgeScrollTimeout);
 }
 
 void EditorTimelineCanvas::setNotes(const QVector<NoteData> &notes)
@@ -84,7 +87,12 @@ void EditorTimelineCanvas::setTotalDuration(int durationMs)
 
 void EditorTimelineCanvas::setCurrentTime(int timeMs)
 {
-    m_currentTimeMs = qBound(0, timeMs, m_totalDurationMs);
+    setCurrentTime(static_cast<double>(timeMs));
+}
+
+void EditorTimelineCanvas::setCurrentTime(double timeMs)
+{
+    m_currentTimeMs = qBound(0.0, timeMs, static_cast<double>(m_totalDurationMs));
     update();
 }
 
@@ -102,11 +110,16 @@ int EditorTimelineCanvas::maxScrollTime() const
 
 void EditorTimelineCanvas::setScrollTime(int timeMs)
 {
-    int maxScroll = maxScrollTime();
-    int newScroll = qBound(0, timeMs, maxScroll);
-    if (newScroll != m_scrollTimeMs) {
+    setScrollTimePrecise(static_cast<double>(timeMs));
+}
+
+void EditorTimelineCanvas::setScrollTimePrecise(double timeMs)
+{
+    double maxScroll = static_cast<double>(maxScrollTime());
+    double newScroll = qBound(0.0, timeMs, maxScroll);
+    if (std::abs(newScroll - m_scrollTimeMs) > 0.001) {
         m_scrollTimeMs = newScroll;
-        emit scrollChanged(m_scrollTimeMs, maxScroll, visibleTimeMs());
+        emit scrollChanged(static_cast<int>(std::round(m_scrollTimeMs)), static_cast<int>(maxScroll), visibleTimeMs());
         updateHoverInfo();
         update();
     }
@@ -209,14 +222,14 @@ int EditorTimelineCanvas::snapTime(int timeMs) const
     return qMax(0, snapped);
 }
 
-double EditorTimelineCanvas::timeToX(int timeMs) const
+double EditorTimelineCanvas::timeToX(double timeMs) const
 {
     return (timeMs - m_scrollTimeMs) * (m_pixelsPerSecond / 1000.0);
 }
 
 int EditorTimelineCanvas::xToTime(double x) const
 {
-    return m_scrollTimeMs + static_cast<int>(x / (m_pixelsPerSecond / 1000.0));
+    return static_cast<int>(std::round(m_scrollTimeMs + (x / (m_pixelsPerSecond / 1000.0))));
 }
 
 void EditorTimelineCanvas::triggerTapFlash(int timeMs)
@@ -235,7 +248,7 @@ void EditorTimelineCanvas::updateScrollBounds()
     if (m_scrollTimeMs > maxScroll) {
         m_scrollTimeMs = maxScroll;
     }
-    emit scrollChanged(m_scrollTimeMs, maxScroll, visibleTimeMs());
+    emit scrollChanged(static_cast<int>(std::round(m_scrollTimeMs)), maxScroll, visibleTimeMs());
 }
 
 void EditorTimelineCanvas::resizeEvent(QResizeEvent *event)
@@ -618,6 +631,68 @@ void EditorTimelineCanvas::paintEvent(QPaintEvent *event)
     drawPlayhead(painter, w, h, rulerH);
 }
 
+void EditorTimelineCanvas::onEdgeScrollTimeout()
+{
+    if (!m_isScrubbingRuler && !m_isDraggingNotes && !m_isMarqueeSelecting) {
+        if (m_edgeScrollTimer && m_edgeScrollTimer->isActive()) {
+            m_edgeScrollTimer->stop();
+        }
+        return;
+    }
+
+    double x = m_mousePos.x();
+    double w = width();
+    double edgeZone = 40.0;
+    double pxPerMs = m_pixelsPerSecond / 1000.0;
+    if (pxPerMs <= 0.00001 || w <= edgeZone * 2) {
+        if (m_edgeScrollTimer && m_edgeScrollTimer->isActive()) {
+            m_edgeScrollTimer->stop();
+        }
+        return;
+    }
+
+    int scrollDir = 0;
+    double intensity = 0.0;
+    if (x > w - edgeZone) {
+        scrollDir = 1;
+        intensity = qBound(0.0, (x - (w - edgeZone)) / edgeZone, 1.0);
+    } else if (x < edgeZone) {
+        scrollDir = -1;
+        intensity = qBound(0.0, (edgeZone - x) / edgeZone, 1.0);
+    }
+
+    if (scrollDir == 0) {
+        if (m_edgeScrollTimer && m_edgeScrollTimer->isActive()) {
+            m_edgeScrollTimer->stop();
+        }
+        return;
+    }
+
+    // Плавная непрерывная прокрутка даже если мышь неподвижно удерживается у края
+    double pxPerTick = 2.0 + 3.0 * intensity;
+    double scrollStep = qMax(1.0, pxPerTick / pxPerMs);
+    double newScroll = qBound(0.0, m_scrollTimeMs + static_cast<double>(scrollDir) * scrollStep, static_cast<double>(maxScrollTime()));
+    setScrollTimePrecise(newScroll);
+
+    if (m_isScrubbingRuler) {
+        int seekTime = qBound(0, xToTime(qBound(0.0, x, w)), m_totalDurationMs);
+        emit seekRequested(seekTime);
+    } else if (m_isDraggingNotes && !m_dragOriginalTimes.isEmpty()) {
+        int currentMouseTime = xToTime(x);
+        int rawDelta = snapTime(currentMouseTime) - snapTime(m_dragAnchorTimeMs);
+        int minOrig = 99999999;
+        for (int t : m_dragOriginalTimes) {
+            if (t < minOrig) minOrig = t;
+        }
+        if (minOrig + rawDelta < 0) {
+            rawDelta = -minOrig;
+        }
+        m_dragCurrentDeltaMs = rawDelta;
+    }
+
+    update();
+}
+
 void EditorTimelineCanvas::mousePressEvent(QMouseEvent *event)
 {
     const double rulerH = 36.0;
@@ -636,7 +711,16 @@ void EditorTimelineCanvas::mousePressEvent(QMouseEvent *event)
         if (event->position().y() < rulerH) {
             // Click on ruler: seek playhead
             m_isScrubbingRuler = true;
-            int seekTime = qBound(0, xToTime(event->position().x()), m_totalDurationMs);
+            m_mousePos = event->position();
+            double x = event->position().x();
+            double w = width();
+            double edgeZone = 40.0;
+            if (x > w - edgeZone || x < edgeZone) {
+                if (!m_edgeScrollTimer->isActive()) {
+                    m_edgeScrollTimer->start(16);
+                }
+            }
+            int seekTime = qBound(0, xToTime(qBound(0.0, x, w)), m_totalDurationMs);
             emit seekRequested(seekTime);
             event->accept();
             return;
@@ -784,7 +868,7 @@ void EditorTimelineCanvas::mouseMoveEvent(QMouseEvent *event)
             }
         }
         update();
-        if (!m_isPanning) {
+        if (!m_isPanning && !m_isScrubbingRuler && !m_isDraggingNotes && !m_isMarqueeSelecting) {
             return;
         }
     } else {
@@ -794,8 +878,8 @@ void EditorTimelineCanvas::mouseMoveEvent(QMouseEvent *event)
     // MMB Panning
     if (m_isPanning) {
         double dx = event->position().x() - m_panStartMouseX;
-        int timeShift = static_cast<int>(dx / (m_pixelsPerSecond / 1000.0));
-        setScrollTime(m_panStartScrollTime - timeShift);
+        double timeShift = dx / (m_pixelsPerSecond / 1000.0);
+        setScrollTimePrecise(m_panStartScrollTime - timeShift);
         event->accept();
         return;
     }
@@ -803,9 +887,24 @@ void EditorTimelineCanvas::mouseMoveEvent(QMouseEvent *event)
     // Hover info computation
     updateHoverInfo();
 
-    // Scrubbing ruler
+    // Scrubbing ruler with gentle continuous edge scrolling
     if (m_isScrubbingRuler) {
-        int seekTime = qBound(0, xToTime(event->position().x()), m_totalDurationMs);
+        double x = event->position().x();
+        double w = width();
+        double edgeZone = 40.0;
+
+        // Активация таймера плавной непрерывной прокрутки при удержании курсора у границы
+        if (x > w - edgeZone || x < edgeZone) {
+            if (!m_edgeScrollTimer->isActive()) {
+                m_edgeScrollTimer->start(16);
+            }
+        } else {
+            if (m_edgeScrollTimer->isActive()) {
+                m_edgeScrollTimer->stop();
+            }
+        }
+
+        int seekTime = qBound(0, xToTime(qBound(0.0, x, w)), m_totalDurationMs);
         emit seekRequested(seekTime);
         update();
         event->accept();
@@ -959,6 +1058,9 @@ void EditorTimelineCanvas::mouseReleaseEvent(QMouseEvent *event)
     }
 
     m_isScrubbingRuler = false;
+    if (m_edgeScrollTimer && m_edgeScrollTimer->isActive()) {
+        m_edgeScrollTimer->stop();
+    }
 
     // Brush placement completed: emit batch command to QUndoStack
     if (m_isBrushingPlace) {
@@ -1025,6 +1127,11 @@ void EditorTimelineCanvas::leaveEvent(QEvent *event)
         m_isPanning = false;
         unsetCursor();
     }
+    if (!m_isScrubbingRuler && !m_isDraggingNotes) {
+        if (m_edgeScrollTimer && m_edgeScrollTimer->isActive()) {
+            m_edgeScrollTimer->stop();
+        }
+    }
     m_mouseInside = false;
     update();
     QWidget::leaveEvent(event);
@@ -1046,7 +1153,7 @@ void EditorTimelineCanvas::wheelEvent(QWheelEvent *event)
 
         if (qAbs(newPixelsPerSecond - m_pixelsPerSecond) > 0.1) {
             m_pixelsPerSecond = newPixelsPerSecond;
-            m_scrollTimeMs = qMax(0, timeUnderMouse - static_cast<int>(mouseX / (m_pixelsPerSecond / 1000.0)));
+            m_scrollTimeMs = qMax(0.0, timeUnderMouse - (mouseX / (m_pixelsPerSecond / 1000.0)));
             updateScrollBounds();
             emit zoomChanged(m_pixelsPerSecond);
             updateHoverInfo();
@@ -1068,8 +1175,7 @@ void EditorTimelineCanvas::wheelEvent(QWheelEvent *event)
         pixelsToScroll *= 2.0;
     }
 
-    int timeShift = static_cast<int>(std::round(pixelsToScroll / pxPerMs));
-    setScrollTime(m_scrollTimeMs + timeShift);
+    setScrollTimePrecise(m_scrollTimeMs + (pixelsToScroll / pxPerMs));
     updateHoverInfo();
     event->accept();
 }

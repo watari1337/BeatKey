@@ -118,10 +118,6 @@ private slots:
     void handleRedo();
     void handleBackButtonClicked();
     void handleTabChanged(int index);
-    void handleBgDimSliderChanged(int value);
-    void handleBgBlurSliderChanged(int value);
-    void handleBgDesatSliderChanged(int value);
-    void handleBgVignetteSliderChanged(int value);
 
 private:
     void setupUi();
@@ -169,6 +165,7 @@ private:
     AudioWaveform *m_waveform;
     QElapsedTimer m_audioClock;
     qint64 m_clockBaseMs;
+    double m_lastReportedPlaybackMs = 0.0;
     qint64 m_lastMediaPos;
 
     // Undo / Redo
@@ -190,14 +187,6 @@ private:
     // Description Page Widgets
     QLabel *m_descCoverPreview;
     QLabel *m_descAudioPathLabel;
-    QSlider *m_descBgDimSlider;
-    QLabel *m_descBgDimValLabel;
-    QSlider *m_descBgBlurSlider;
-    QLabel *m_descBgBlurValLabel;
-    QSlider *m_descBgDesatSlider;
-    QLabel *m_descBgDesatValLabel;
-    QSlider *m_descBgVignetteSlider;
-    QLabel *m_descBgVignetteValLabel;
 
     // Top Header & Playback
     QFrame *m_headerContainer;
@@ -251,6 +240,12 @@ private:
     // Quantization Grid Widgets
     QComboBox *m_quantPresetCombo;
     QSpinBox *m_quantCustomSpin;
+
+    // Sidebar Timing & Track Properties Widgets
+    QDoubleSpinBox *m_sideBpmSpin;
+    QSpinBox *m_sideOffsetSpin;
+    QSpinBox *m_sideDurationSpin;
+    QPushButton *m_sideAutoDurationBtn;
 
     // Selection Widgets
     QLabel *m_selCountLabel;

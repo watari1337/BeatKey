@@ -85,9 +85,11 @@ public:
      * @param hitLineX Координата X линии нажатия.
      */
     NoteRenderObject getNoteRenderObject(const NoteData &note,
-                                        qint64 currentTimeMs,
+                                        double currentTimeMs,
                                         const QRectF &trackRect,
                                         qreal hitLineX) const;
+    double currentTrackTimePreciseMs() const;
+    qint64 currentTrackTimeMs() const;
 
     // Настройки отображения фона
     int bgDimPercent() const { return m_bgDimPercent; }
@@ -125,17 +127,23 @@ private:
     void spawnFloatingJudgment(const QString &text, const QColor &color);
     void finishGame(bool failed);
     void showPauseDialog();
-    void startResumeCountdown(int count = 3, bool isInitial = false);
+    void startResumeCountdown(int count = 3);
     void cancelCountdown();
-    qint64 currentTrackTimeMs() const;
+    void loadNoteTexture();
+    void loadHitTargetTexture();
 
     Beatmap m_beatmap;
     QVector<GameplayNote> m_notes;
     int m_lastNoteTimeMs = 0;
 
-    // Спрайт ноты из ресурсов
+    static constexpr qreal NOTE_WIDTH = 32.0;
+    static constexpr qreal NOTE_HEIGHT = 60.0;
+
+    // Спрайт ноты и рамки зоны нажатия
     QPixmap m_notePixmap;
     QPixmap m_scaledNotePixmap;
+    QPixmap m_hitTargetPixmap;
+    QPixmap m_scaledHitTargetPixmap;
 
     // Визуальные настройки фона
     int m_bgDimPercent = 50;
@@ -158,9 +166,13 @@ private:
     bool m_isFinished = false;
     bool m_isPaused = false;
     bool m_isCountingDown = false;
-    bool m_isStartingCountdown = false;
-    bool m_isInitialCountdown = false;
     int m_countdownNumber = 0;
+
+    // Вступительная задержка (1 секунда до старта музыки со свободным движением нот)
+    bool m_isLeadIn = false;
+    qint64 m_leadInElapsedMs = 0;
+    QElapsedTimer m_leadInClock;
+    static constexpr qint64 LEAD_IN_DURATION_MS = 1000;
 
     // Таймеры анимации и синхронизации
     QTimer *m_gameLoopTimer;
@@ -169,13 +181,14 @@ private:
     mutable QElapsedTimer m_audioClock;
     mutable qint64 m_clockBaseMs = 0;
     mutable qint64 m_lastMediaPos = -1;
-    qint64 m_pausedElapsedMs = 0;
+    double m_pausedElapsedMs = 0.0;
 
     // Геометрия игрового поля
     QRectF m_trackRect;
     qreal m_hitLineX = 160.0;
-    qreal m_travelTimeMs = 1000.0; // 1000 мс время долета ноты по ТЗ 4.7.1.3
-    qreal m_keyPressGlow = 0.0;
+    qreal m_travelTimeMs = 1000.0;
+    mutable double m_lastRenderedTrackTimeMs = -999999.0; // 1000 мс время долета ноты по ТЗ 4.7.1.3
+
 
     // Всплывающие оценки точности
     QList<FloatingJudgment> m_floatingJudgments;

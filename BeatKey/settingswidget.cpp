@@ -130,6 +130,10 @@ SettingsWidget::SettingsWidget(QWidget *parent)
     , m_offsetSpinBox(nullptr)
     , m_autoCalibBtn(nullptr)
     , m_screenModeCombo(nullptr)
+    , m_bgDimSlider(nullptr)
+    , m_bgDimValLabel(nullptr)
+    , m_bgBlurSlider(nullptr)
+    , m_bgBlurValLabel(nullptr)
     , m_resetBtn(nullptr)
     , m_resetRecordsBtn(nullptr)
     , m_backBtn(nullptr)
@@ -445,6 +449,69 @@ void SettingsWidget::setupUi()
         contentLayout->addWidget(createSection(QStringLiteral("Отображение экрана"), videoContent));
     }
 
+    // 6. Background Display Section
+    {
+        auto *bgContent = new QWidget(contentWidget);
+        bgContent->setStyleSheet(QStringLiteral("border:none; background:transparent;"));
+        auto *grid = new QGridLayout(bgContent);
+        grid->setContentsMargins(0, 0, 0, 0);
+        grid->setHorizontalSpacing(20);
+        grid->setVerticalSpacing(14);
+        grid->setColumnStretch(0, 0);
+        grid->setColumnStretch(1, 1);
+        grid->setColumnStretch(2, 0);
+
+        // Row 0: Background Dim
+        auto *dimLabel = new QLabel(QStringLiteral("Затемнение фона:"), bgContent);
+        dimLabel->setStyleSheet(QStringLiteral("font-size: 14px;"));
+
+        m_bgDimValLabel = new QLabel(bgContent);
+        m_bgDimValLabel->setStyleSheet(Theme::secondaryLabelStyle());
+        m_bgDimValLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        m_bgDimValLabel->setMinimumWidth(55);
+
+        m_bgDimSlider = new QSlider(Qt::Horizontal, bgContent);
+        m_bgDimSlider->setRange(0, 100);
+        m_bgDimSlider->setStyleSheet(Theme::sliderStyle());
+        m_bgDimSlider->setToolTip(QStringLiteral("0% — оригинальная яркость обложки, 100% — полностью черный фон"));
+
+        connect(m_bgDimSlider, &QSlider::valueChanged, this, [this](int v) {
+            m_bgDimValLabel->setText(QString::number(v) + QStringLiteral("%"));
+            SettingsManager::instance().setBgDimPercent(v);
+            SettingsManager::instance().saveSettings();
+        });
+
+        grid->addWidget(dimLabel, 0, 0);
+        grid->addWidget(m_bgDimSlider, 0, 1);
+        grid->addWidget(m_bgDimValLabel, 0, 2);
+
+        // Row 1: Background Blur
+        auto *blurLabel = new QLabel(QStringLiteral("Размытие фона:"), bgContent);
+        blurLabel->setStyleSheet(QStringLiteral("font-size: 14px;"));
+
+        m_bgBlurValLabel = new QLabel(bgContent);
+        m_bgBlurValLabel->setStyleSheet(Theme::secondaryLabelStyle());
+        m_bgBlurValLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        m_bgBlurValLabel->setMinimumWidth(55);
+
+        m_bgBlurSlider = new QSlider(Qt::Horizontal, bgContent);
+        m_bgBlurSlider->setRange(0, 20);
+        m_bgBlurSlider->setStyleSheet(Theme::sliderStyle());
+        m_bgBlurSlider->setToolTip(QStringLiteral("Размывает мелкие детали обложки во время игры для читаемости нот"));
+
+        connect(m_bgBlurSlider, &QSlider::valueChanged, this, [this](int v) {
+            m_bgBlurValLabel->setText(QString::number(v) + QStringLiteral(" px"));
+            SettingsManager::instance().setBgBlurRadius(v);
+            SettingsManager::instance().saveSettings();
+        });
+
+        grid->addWidget(blurLabel, 1, 0);
+        grid->addWidget(m_bgBlurSlider, 1, 1);
+        grid->addWidget(m_bgBlurValLabel, 1, 2);
+
+        contentLayout->addWidget(createSection(QStringLiteral("Отображение фона в игре"), bgContent));
+    }
+
     scrollArea->setWidget(contentWidget);
     mainLayout->addWidget(scrollArea, 1);
 
@@ -516,6 +583,20 @@ void SettingsWidget::loadFromSettingsManager()
     if (m_screenModeCombo) {
         const QSignalBlocker blocker(m_screenModeCombo);
         m_screenModeCombo->setCurrentIndex(mgr.isFullscreen() ? 1 : 0);
+    }
+    if (m_bgDimSlider) {
+        const QSignalBlocker blocker(m_bgDimSlider);
+        m_bgDimSlider->setValue(mgr.bgDimPercent());
+        if (m_bgDimValLabel) {
+            m_bgDimValLabel->setText(QString::number(mgr.bgDimPercent()) + QStringLiteral("%"));
+        }
+    }
+    if (m_bgBlurSlider) {
+        const QSignalBlocker blocker(m_bgBlurSlider);
+        m_bgBlurSlider->setValue(mgr.bgBlurRadius());
+        if (m_bgBlurValLabel) {
+            m_bgBlurValLabel->setText(QString::number(mgr.bgBlurRadius()) + QStringLiteral(" px"));
+        }
     }
 }
 
@@ -842,8 +923,6 @@ void SettingsWidget::showFinalInfo(const QString &title, const QString &message)
 
 void SettingsWidget::handleResetRecords()
 {
-    AudioManager::instance().playClickSound();
-
     const QString warnTitle = QStringLiteral("Предупреждение");
 
     // 1. точно ли вы уверены?
