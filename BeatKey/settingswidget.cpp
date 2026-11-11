@@ -448,7 +448,7 @@ void SettingsWidget::setupUi()
     scrollArea->setWidget(contentWidget);
     mainLayout->addWidget(scrollArea, 1);
 
-    // Bottom Action Bar: Reset to defaults
+    // Bottom Action Bar: Reset to defaults & Reset local records
     auto *bottomLayout = new QHBoxLayout();
     bottomLayout->setSpacing(16);
 
@@ -460,7 +460,13 @@ void SettingsWidget::setupUi()
         resetDefaults();
     });
 
+    m_resetRecordsBtn = new QPushButton(QStringLiteral("Сбросить локальные рекорды"), this);
+    m_resetRecordsBtn->setCursor(Qt::PointingHandCursor);
+    m_resetRecordsBtn->setStyleSheet(Theme::dangerButtonStyle());
+    connect(m_resetRecordsBtn, &QPushButton::clicked, this, &SettingsWidget::handleResetRecords);
+
     bottomLayout->addWidget(m_resetBtn);
+    bottomLayout->addWidget(m_resetRecordsBtn);
     bottomLayout->addStretch(1);
 
     mainLayout->addLayout(bottomLayout);
@@ -550,7 +556,7 @@ void SettingsWidget::startAutoCalibration()
 // Easter-egg 8-step Local Records Reset
 // ============================================================================
 
-bool SettingsWidget::showConfirmStep(const QString &title, const QString &message, const QString &confirmText)
+bool SettingsWidget::showConfirmStep(const QString &title, const QString &message, const QString &confirmText, int step)
 {
     AudioManager::instance().playClickSound();
 
@@ -609,11 +615,16 @@ bool SettingsWidget::showConfirmStep(const QString &title, const QString &messag
     buttonLayout->setAlignment(Qt::AlignCenter);
     buttonLayout->setSpacing(14);
 
+    int confirmWidth = qMax(85, 160 - (step - 1) * 11);
+    int confirmHeight = qMax(28, 42 - (step - 1) * 2);
+
+    int cancelWidth = qMin(220, 110 + (step - 1) * 15);
+    int cancelHeight = qMin(52, 40 + (step - 1) * 2);
+
     auto *confirmBtn = new QPushButton(confirmText, container);
     confirmBtn->setCursor(Qt::PointingHandCursor);
-    confirmBtn->setStyleSheet(Theme::dangerButtonStyle());
-    confirmBtn->setFixedHeight(40);
-    confirmBtn->setMinimumWidth(140);
+    confirmBtn->setStyleSheet(Theme::easterEggDangerButtonStyle(step));
+    confirmBtn->setFixedSize(confirmWidth, confirmHeight);
     QObject::connect(confirmBtn, &QPushButton::clicked, &dialog, [&dialog]() {
         AudioManager::instance().playClickSound();
         dialog.accept();
@@ -622,9 +633,8 @@ bool SettingsWidget::showConfirmStep(const QString &title, const QString &messag
 
     auto *cancelBtn = new QPushButton(QStringLiteral("Отмена"), container);
     cancelBtn->setCursor(Qt::PointingHandCursor);
-    cancelBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    cancelBtn->setFixedHeight(40);
-    cancelBtn->setMinimumWidth(110);
+    cancelBtn->setStyleSheet(Theme::easterEggCancelButtonStyle(step));
+    cancelBtn->setFixedSize(cancelWidth, cancelHeight);
     QObject::connect(cancelBtn, &QPushButton::clicked, &dialog, [&dialog]() {
         AudioManager::instance().playClickSound();
         dialog.reject();
@@ -637,7 +647,7 @@ bool SettingsWidget::showConfirmStep(const QString &title, const QString &messag
     return dialog.exec() == QDialog::Accepted;
 }
 
-bool SettingsWidget::showInputStep(const QString &title, const QString &message, const QString &expectedText, bool caseSensitive)
+bool SettingsWidget::showInputStep(const QString &title, const QString &message, const QString &expectedText, bool caseSensitive, int step)
 {
     AudioManager::instance().playClickSound();
 
@@ -707,11 +717,16 @@ bool SettingsWidget::showInputStep(const QString &title, const QString &message,
     buttonLayout->setAlignment(Qt::AlignCenter);
     buttonLayout->setSpacing(14);
 
+    int confirmWidth = qMax(85, 160 - (step - 1) * 11);
+    int confirmHeight = qMax(28, 42 - (step - 1) * 2);
+
+    int cancelWidth = qMin(220, 110 + (step - 1) * 15);
+    int cancelHeight = qMin(52, 40 + (step - 1) * 2);
+
     auto *confirmBtn = new QPushButton(QStringLiteral("Подтвердить"), container);
     confirmBtn->setCursor(Qt::PointingHandCursor);
-    confirmBtn->setStyleSheet(Theme::dangerButtonStyle());
-    confirmBtn->setFixedHeight(40);
-    confirmBtn->setMinimumWidth(130);
+    confirmBtn->setStyleSheet(Theme::easterEggDangerButtonStyle(step));
+    confirmBtn->setFixedSize(confirmWidth, confirmHeight);
 
     auto checkAndAccept = [&]() {
         QString entered = lineEdit->text().trimmed();
@@ -736,9 +751,8 @@ bool SettingsWidget::showInputStep(const QString &title, const QString &message,
 
     auto *cancelBtn = new QPushButton(QStringLiteral("Отмена"), container);
     cancelBtn->setCursor(Qt::PointingHandCursor);
-    cancelBtn->setStyleSheet(Theme::secondaryButtonStyle());
-    cancelBtn->setFixedHeight(40);
-    cancelBtn->setMinimumWidth(110);
+    cancelBtn->setStyleSheet(Theme::easterEggCancelButtonStyle(step));
+    cancelBtn->setFixedSize(cancelWidth, cancelHeight);
     QObject::connect(cancelBtn, &QPushButton::clicked, &dialog, [&dialog]() {
         AudioManager::instance().playClickSound();
         dialog.reject();
@@ -830,65 +844,76 @@ void SettingsWidget::handleResetRecords()
 {
     AudioManager::instance().playClickSound();
 
-    // 1. точно ли вы уверен
-    if (!showConfirmStep(QStringLiteral("Предупреждение (1/8)"),
+    const QString warnTitle = QStringLiteral("Предупреждение");
+
+    // 1. точно ли вы уверены?
+    if (!showConfirmStep(warnTitle,
                          QStringLiteral("Точно ли вы уверены?"),
-                         QStringLiteral("Да, уверен"))) {
+                         QStringLiteral("Да, уверен"),
+                         1)) {
         return;
     }
 
-    // 2. это без возратно удалит ваши рекорды
-    if (!showConfirmStep(QStringLiteral("Предупреждение (2/8)"),
+    // 2. это безвозвратно удалит ваши рекорды!
+    if (!showConfirmStep(warnTitle,
                          QStringLiteral("Это безвозвратно удалит ваши рекорды!"),
-                         QStringLiteral("Я понимаю риск"))) {
+                         QStringLiteral("Я понимаю риск"),
+                         2)) {
         return;
     }
 
-    // 3. вы понимаете что делаете?
-    if (!showConfirmStep(QStringLiteral("Предупреждение (3/8)"),
+    // 3. вы понимаете, что делаете?
+    if (!showConfirmStep(warnTitle,
                          QStringLiteral("Вы понимаете, что делаете?"),
-                         QStringLiteral("Да, абсолютно"))) {
+                         QStringLiteral("Да, абсолютно"),
+                         3)) {
         return;
     }
 
-    // 4. введите капосом слово удалить чтобы подтвердить свои действия
-    if (!showInputStep(QStringLiteral("Предупреждение (4/8)"),
+    // 4. введите капсом слово удалить, чтобы подтвердить свои действия
+    if (!showInputStep(warnTitle,
                        QStringLiteral("Введите капсом слово УДАЛИТЬ, чтобы подтвердить свои действия:"),
                        QStringLiteral("УДАЛИТЬ"),
-                       true)) {
+                       true,
+                       4)) {
         return;
     }
 
-    // 5. вы никогда не вернёте свои рекорды!!
-    if (!showConfirmStep(QStringLiteral("Предупреждение (5/8)"),
+    // 5. вы никогда не вернете свои рекорды!!
+    if (!showConfirmStep(warnTitle,
                          QStringLiteral("Вы никогда не вернете свои рекорды!!"),
-                         QStringLiteral("Все равно удалить"))) {
+                         QStringLiteral("Все равно удалить"),
+                         5)) {
         return;
     }
 
-    // 6. введите свой ник чтобы подтвердить свои дейсвия
+    // 6. введите свой ник чтобы подтвердить свои действия (первые 3 буквы и всегда 5 звёздочек)
     QString playerNick = SettingsManager::instance().nickname().trimmed();
     if (playerNick.isEmpty()) {
         playerNick = QStringLiteral("Player");
     }
-    if (!showInputStep(QStringLiteral("Предупреждение (6/8)"),
-                       QStringLiteral("Введите свой ник (%1), чтобы подтвердить свои действия:").arg(playerNick),
+    QString maskedNick = playerNick.left(3) + QStringLiteral("*****");
+    if (!showInputStep(warnTitle,
+                       QStringLiteral("Введите свой ник (%1), чтобы подтвердить свои действия:").arg(maskedNick),
                        playerNick,
-                       false)) {
+                       false,
+                       6)) {
         return;
     }
 
-    // 7. вы сумасшедший?! зачем это делать, просто оставь те их
-    if (!showConfirmStep(QStringLiteral("Предупреждение (7/8)"),
+    // 7. вы сумасшедший?! зачем это делать, просто оставьте их
+    if (!showConfirmStep(warnTitle,
                          QStringLiteral("Вы сумасшедший?! Зачем это делать, просто оставьте их"),
-                         QStringLiteral("Нет, удаляй!"))) {
+                         QStringLiteral("Нет, удаляй!"),
+                         7)) {
         return;
     }
 
     // 8. ладно, это ваше решение.....
-    if (!showConfirmStep(QStringLiteral("Предупреждение (8/8)"),
+    if (!showConfirmStep(warnTitle,
                          QStringLiteral("Ладно, это ваше решение....."),
-                         QStringLiteral("Очистить все"))) {
+                         QStringLiteral("Очистить все"),
+                         8)) {
         return;
     }
 

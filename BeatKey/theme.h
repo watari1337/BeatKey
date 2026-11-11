@@ -127,6 +127,8 @@ namespace Colors {
     QString secondaryButtonStyle();
     QString successButtonStyle();
     QString dangerButtonStyle();
+    QString easterEggDangerButtonStyle(int step);
+    QString easterEggCancelButtonStyle(int step);
     QString menuButtonStyle();
     QString menuExitButtonStyle();
     QString dialogCloseButtonStyle();

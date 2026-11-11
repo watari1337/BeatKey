@@ -94,8 +94,8 @@ private:
     QPushButton *m_backBtn;
 
     void handleResetRecords();
-    bool showConfirmStep(const QString &title, const QString &message, const QString &confirmText = QStringLiteral("Да, продолжить"));
-    bool showInputStep(const QString &title, const QString &message, const QString &expectedText, bool caseSensitive = true);
+    bool showConfirmStep(const QString &title, const QString &message, const QString &confirmText = QStringLiteral("Да, продолжить"), int step = 1);
+    bool showInputStep(const QString &title, const QString &message, const QString &expectedText, bool caseSensitive = true, int step = 1);
     void showFinalInfo(const QString &title, const QString &message);
 };
 
