@@ -13,9 +13,11 @@
 #include <windows.h>
 #endif
 
-SavePromptDialog::SavePromptDialog(QWidget *parent)
+SavePromptDialog::SavePromptDialog(QWidget *parent, const QString &title, const QString &message)
     : QDialog(parent)
     , m_result(Result::Cancel)
+    , m_customTitle(title)
+    , m_customMessage(message)
 {
     setWindowFlags(Qt::Dialog | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
     setAttribute(Qt::WA_TranslucentBackground);
@@ -80,44 +82,51 @@ void SavePromptDialog::setupUi()
     container->setGraphicsEffect(shadow);
 
     auto *innerLayout = new QVBoxLayout(container);
-    innerLayout->setContentsMargins(32, 28, 32, 28);
-    innerLayout->setSpacing(20);
+    innerLayout->setContentsMargins(24, 20, 24, 24);
+    innerLayout->setSpacing(18);
 
-    auto *titleLabel = new QLabel(QStringLiteral("Несохраненные изменения"), container);
+    auto *headerLayout = new QHBoxLayout();
+    headerLayout->setContentsMargins(0, 0, 0, 0);
+
+    auto *spacerLeft = new QWidget(container);
+    spacerLeft->setFixedSize(28, 28);
+    headerLayout->addWidget(spacerLeft);
+
+    QString displayTitle = m_customTitle.isEmpty() ? QStringLiteral("Несохраненные изменения") : m_customTitle;
+    auto *titleLabel = new QLabel(displayTitle, container);
     titleLabel->setAlignment(Qt::AlignCenter);
-    titleLabel->setStyleSheet(QStringLiteral(
-        "font-family: 'Segoe UI', sans-serif;"
-        "font-size: 20px;"
-        "font-weight: bold;"
-        "color: #ffffff;"
-        "background: transparent;"
-        "border: none;"
-    ));
-    innerLayout->addWidget(titleLabel);
+    titleLabel->setStyleSheet(Theme::dialogTitleStyle());
+    headerLayout->addWidget(titleLabel, 1);
+
+    auto *closeBtn = new QPushButton(QStringLiteral("✕"), container);
+    closeBtn->setCursor(Qt::PointingHandCursor);
+    closeBtn->setFixedSize(28, 28);
+    closeBtn->setStyleSheet(Theme::dialogCloseButtonStyle());
+    connect(closeBtn, &QPushButton::clicked, this, [this]() {
+        AudioManager::instance().playClickSound();
+        m_result = Result::Cancel;
+        reject();
+    });
+    headerLayout->addWidget(closeBtn);
+    innerLayout->addLayout(headerLayout);
 
     auto *descLabel = new QLabel(
-        QStringLiteral("В карте есть несохраненные изменения.\nСохранить перед выходом в хаб редактора?"),
+        m_customMessage.isEmpty() ? QStringLiteral("В карте есть несохраненные изменения.\nСохранить перед выходом в хаб редактора?") : m_customMessage,
         container
     );
     descLabel->setAlignment(Qt::AlignCenter);
-    descLabel->setStyleSheet(QStringLiteral(
-        "font-family: 'Segoe UI', sans-serif;"
-        "font-size: 14px;"
-        "color: #a09cb0;"
-        "line-height: 1.4;"
-        "background: transparent;"
-        "border: none;"
-    ));
+    descLabel->setStyleSheet(Theme::dialogMessageStyle());
     innerLayout->addWidget(descLabel);
 
     auto *buttonsLayout = new QHBoxLayout();
+    buttonsLayout->setAlignment(Qt::AlignCenter);
     buttonsLayout->setSpacing(16);
 
     auto *saveBtn = new QPushButton(QStringLiteral("Сохранить"), container);
     saveBtn->setCursor(Qt::PointingHandCursor);
     saveBtn->setStyleSheet(Theme::primaryButtonStyle());
     saveBtn->setFixedHeight(40);
-    saveBtn->setMinimumWidth(120);
+    saveBtn->setMinimumWidth(130);
     connect(saveBtn, &QPushButton::clicked, this, [this]() {
         AudioManager::instance().playClickSound();
         m_result = Result::Save;
@@ -129,7 +138,7 @@ void SavePromptDialog::setupUi()
     discardBtn->setCursor(Qt::PointingHandCursor);
     discardBtn->setStyleSheet(Theme::dangerButtonStyle());
     discardBtn->setFixedHeight(40);
-    discardBtn->setMinimumWidth(120);
+    discardBtn->setMinimumWidth(130);
     connect(discardBtn, &QPushButton::clicked, this, [this]() {
         AudioManager::instance().playClickSound();
         m_result = Result::Discard;

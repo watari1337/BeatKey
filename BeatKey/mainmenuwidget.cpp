@@ -154,7 +154,7 @@ void MainMenuWidget::setupUi()
     ));
     refreshProfileInfo();
 
-    auto *versionLabel = new QLabel(QStringLiteral("BeatKey v0.2"), this);
+    auto *versionLabel = new QLabel(QStringLiteral("BeatKey v0.3"), this);
     versionLabel->setStyleSheet(QStringLiteral(
         "color: #706a84;"
         "font-family: 'Segoe UI', sans-serif;"

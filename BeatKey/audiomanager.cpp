@@ -18,6 +18,8 @@ AudioManager::AudioManager(QObject *parent)
     : QObject(parent)
     , m_musicPlayer(nullptr)
     , m_musicOutput(nullptr)
+    , m_currentTrackSource()
+    , m_pendingPositionMs(0)
     , m_sfxHit(nullptr)
     , m_sfxMiss(nullptr)
     , m_sfxComboBreak(nullptr)
@@ -48,6 +50,12 @@ void AudioManager::initMusicPlayer()
 
     connect(m_musicPlayer, &QMediaPlayer::positionChanged, this, &AudioManager::positionChanged);
     connect(m_musicPlayer, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+        if (status == QMediaPlayer::LoadedMedia || status == QMediaPlayer::BufferedMedia) {
+            if (m_pendingPositionMs > 0) {
+                m_musicPlayer->setPosition(m_pendingPositionMs);
+                m_pendingPositionMs = 0;
+            }
+        }
         if (status == QMediaPlayer::EndOfMedia) {
             emit trackFinished();
         }
@@ -103,10 +111,12 @@ void AudioManager::playResultsMusic()
 
 void AudioManager::playTrack(const QString &sourcePath, bool loop)
 {
+    if (!m_musicPlayer) return;
     if (m_currentTrackSource == sourcePath && m_musicPlayer->playbackState() == QMediaPlayer::PlayingState) {
         return; // Трек уже играет
     }
 
+    m_pendingPositionMs = 0;
     m_currentTrackSource = sourcePath;
     m_musicPlayer->stop();
     m_musicPlayer->setSource(resolveUrl(sourcePath));
@@ -116,27 +126,31 @@ void AudioManager::playTrack(const QString &sourcePath, bool loop)
 
 void AudioManager::pauseMusic()
 {
-    if (m_musicPlayer->playbackState() == QMediaPlayer::PlayingState) {
+    if (m_musicPlayer && m_musicPlayer->playbackState() == QMediaPlayer::PlayingState) {
         m_musicPlayer->pause();
     }
 }
 
 void AudioManager::resumeMusic()
 {
-    if (m_musicPlayer->playbackState() == QMediaPlayer::PausedState) {
+    if (m_musicPlayer && m_musicPlayer->playbackState() == QMediaPlayer::PausedState) {
         m_musicPlayer->play();
     }
 }
 
 void AudioManager::stopMusic()
 {
-    m_musicPlayer->stop();
+    if (m_musicPlayer) {
+        m_musicPlayer->stop();
+        m_musicPlayer->setSource(QUrl());
+    }
+    m_pendingPositionMs = 0;
     m_currentTrackSource.clear();
 }
 
 bool AudioManager::isMusicPlaying() const
 {
-    return m_musicPlayer->playbackState() == QMediaPlayer::PlayingState;
+    return m_musicPlayer && m_musicPlayer->playbackState() == QMediaPlayer::PlayingState;
 }
 
 // ============================================================================
@@ -145,11 +159,12 @@ bool AudioManager::isMusicPlaying() const
 
 qint64 AudioManager::currentPositionMs() const
 {
-    return m_musicPlayer->position();
+    return m_musicPlayer ? m_musicPlayer->position() : 0;
 }
 
 qint64 AudioManager::syncedPositionMs() const
 {
+    if (!m_musicPlayer) return 0;
     qint64 rawPos = m_musicPlayer->position();
     int offset = SettingsManager::instance().audioOffsetMs();
     return rawPos - offset;
@@ -157,12 +172,25 @@ qint64 AudioManager::syncedPositionMs() const
 
 qint64 AudioManager::trackDurationMs() const
 {
-    return m_musicPlayer->duration();
+    return m_musicPlayer ? m_musicPlayer->duration() : 0;
 }
 
 void AudioManager::setPositionMs(qint64 positionMs)
 {
-    m_musicPlayer->setPosition(positionMs);
+    if (!m_musicPlayer) return;
+    if (positionMs <= 0) {
+        m_pendingPositionMs = 0;
+        m_musicPlayer->setPosition(0);
+        return;
+    }
+
+    auto status = m_musicPlayer->mediaStatus();
+    if (status == QMediaPlayer::LoadedMedia || status == QMediaPlayer::BufferedMedia) {
+        m_musicPlayer->setPosition(positionMs);
+        m_pendingPositionMs = 0;
+    } else {
+        m_pendingPositionMs = positionMs;
+    }
 }
 
 // ============================================================================
@@ -253,15 +281,6 @@ AudioManager::~AudioManager()
 void AudioManager::cleanup()
 {
     stopMusic();
-    if (m_musicPlayer) {
-        m_musicPlayer->stop();
-        delete m_musicPlayer;
-        m_musicPlayer = nullptr;
-    }
-    if (m_musicOutput) {
-        delete m_musicOutput;
-        m_musicOutput = nullptr;
-    }
 
     QSoundEffect* allSfx[] = {
         m_sfxHit, m_sfxMiss, m_sfxComboBreak, m_sfxMetronome,
@@ -271,17 +290,6 @@ void AudioManager::cleanup()
     for (auto *eff : allSfx) {
         if (eff) {
             eff->stop();
-            delete eff;
         }
     }
-
-    m_sfxHit = nullptr;
-    m_sfxMiss = nullptr;
-    m_sfxComboBreak = nullptr;
-    m_sfxMetronome = nullptr;
-    m_sfxCountdown = nullptr;
-    m_sfxFail = nullptr;
-    m_sfxClear = nullptr;
-    m_sfxClick = nullptr;
-    m_sfxHover = nullptr;
 }

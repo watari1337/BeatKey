@@ -78,6 +78,9 @@ private:
     QSlider *m_sfxSlider;
     QLabel *m_sfxValLabel;
 
+    QSlider *m_hitsoundSlider;
+    QLabel *m_hitsoundValLabel;
+
     KeyBindButton *m_primaryKeyBtn;
     KeyBindButton *m_secondaryKeyBtn;
 
@@ -87,7 +90,13 @@ private:
     QComboBox *m_screenModeCombo;
 
     QPushButton *m_resetBtn;
+    QPushButton *m_resetRecordsBtn;
     QPushButton *m_backBtn;
+
+    void handleResetRecords();
+    bool showConfirmStep(const QString &title, const QString &message, const QString &confirmText = QStringLiteral("Да, продолжить"), int step = 1);
+    bool showInputStep(const QString &title, const QString &message, const QString &expectedText, bool caseSensitive = true, int step = 1);
+    void showFinalInfo(const QString &title, const QString &message);
 };
 
 #endif // SETTINGSWIDGET_H

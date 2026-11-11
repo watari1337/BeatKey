@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QKeyEvent>
 #include <QKeySequence>
 #include <QSettings>
 
@@ -71,6 +72,8 @@ public:
     // Helpers
     static QString keyToString(Qt::Key key);
     static Qt::Key stringToKey(const QString &str);
+    static Qt::Key normalizeKey(const QKeyEvent *event);
+    static bool isKeyMatching(const QKeyEvent *event, Qt::Key expectedKey);
     QString configFilePath() const;
 
 signals:

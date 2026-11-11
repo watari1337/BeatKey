@@ -59,6 +59,8 @@ public:
     int currentTime() const { return m_currentTimeMs; }
     int scrollTime() const { return m_scrollTimeMs; }
     int totalDuration() const { return m_totalDurationMs; }
+    int visibleTimeMs() const;
+    int maxScrollTime() const;
     double pixelsPerSecond() const { return m_pixelsPerSecond; }
     EditorTool activeTool() const { return m_activeTool; }
     bool isInteracting() const {
@@ -84,7 +86,7 @@ signals:
     void notesBatchDeleteRequested(const QVector<NoteData> &notes);
     void notesMoved(const QVector<int> &originalTimes, int deltaMs);
     void selectionChanged(const QVector<int> &selectedIndices);
-    void scrollChanged(int scrollTimeMs, int totalDurationMs, int visibleMs);
+    void scrollChanged(int scrollTimeMs, int maxScrollMs, int visibleMs);
     void zoomChanged(double pixelsPerSecond);
     void hoverInfoChanged(int timeMs, int measure, double beatInMeasure);
 

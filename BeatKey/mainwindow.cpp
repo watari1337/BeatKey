@@ -4,10 +4,13 @@
 #include "songselectwidget.h"
 #include "editorhubwidget.h"
 #include "beatmapeditorwidget.h"
+#include "gameplaywidget.h"
+#include "resultswidget.h"
 #include "exitdialog.h"
 #include "settingsmanager.h"
 #include "audiomanager.h"
 #include "theme.h"
+#include "covermanager.h"
 
 #include <QVBoxLayout>
 #include <QLabel>
@@ -24,6 +27,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_songSelectWidget(nullptr)
     , m_editorHubWidget(nullptr)
     , m_editorWidget(nullptr)
+    , m_gameplayWidget(nullptr)
+    , m_resultsWidget(nullptr)
 {
     setWindowTitle(QStringLiteral("BeatKey - Rhythm Game & Beatmap Studio"));
 
@@ -51,12 +56,16 @@ void MainWindow::setupUi()
     m_songSelectWidget = new SongSelectWidget(this);
     m_editorHubWidget = new EditorHubWidget(this);
     m_editorWidget = new BeatmapEditorWidget(this);
+    m_gameplayWidget = new GameplayWidget(this);
+    m_resultsWidget = new ResultsWidget(this);
 
     m_stackedWidget->addWidget(m_mainMenuWidget);       // Index 0: Screen_MainMenu
     m_stackedWidget->addWidget(m_settingsWidget);       // Index 1: Screen_Settings
     m_stackedWidget->addWidget(m_songSelectWidget);     // Index 2: Screen_SongSelect
     m_stackedWidget->addWidget(m_editorHubWidget);      // Index 3: Screen_EditorHub
     m_stackedWidget->addWidget(m_editorWidget);         // Index 4: Screen_Editor
+    m_stackedWidget->addWidget(m_gameplayWidget);       // Index 5: Screen_Gameplay
+    m_stackedWidget->addWidget(m_resultsWidget);        // Index 6: Screen_Results
 
     // Main menu navigation
     connect(m_mainMenuWidget, &MainMenuWidget::playRequested, this, [this]() {
@@ -80,10 +89,48 @@ void MainWindow::setupUi()
     connect(m_songSelectWidget, &SongSelectWidget::backRequested, this, [this]() {
         switchToScreen(Screen_MainMenu);
     });
-    connect(m_songSelectWidget, &SongSelectWidget::playMapRequested, this, [](const Beatmap &map) {
-        // Will launch gameplay screen when gameplay module is implemented
-        Q_UNUSED(map);
+    connect(m_songSelectWidget, &SongSelectWidget::playMapRequested, this, [this](const Beatmap &map) {
+        if (map.notes.isEmpty() || map.totalNotes() == 0) {
+            CoverManager::showMediaErrorDialog(
+                this,
+                QStringLiteral("Карта пуста"),
+                QStringLiteral("В этой карте нет нот для игры.\nДобавьте ноты в редакторе карт перед началом игры.")
+            );
+            return;
+        }
+        m_gameplayWidget->startMap(map);
+        switchToScreen(Screen_Gameplay);
     });
+
+    // Gameplay navigation
+    connect(m_gameplayWidget, &GameplayWidget::gameplayFinished, this, [this](const GameResult &result) {
+        m_resultsWidget->displayResult(result);
+        switchToScreen(Screen_Results);
+    });
+    connect(m_gameplayWidget, &GameplayWidget::exitRequested, this, [this]() {
+        switchToScreen(Screen_SongSelect);
+    });
+
+    // Results navigation
+    connect(m_resultsWidget, &ResultsWidget::retryRequested, this, [this](const Beatmap &map) {
+        if (map.notes.isEmpty() || map.totalNotes() == 0) {
+            CoverManager::showMediaErrorDialog(
+                this,
+                QStringLiteral("Карта пуста"),
+                QStringLiteral("В этой карте нет нот для игры.\nДобавьте ноты в редакторе карт перед началом игры.")
+            );
+            switchToScreen(Screen_SongSelect);
+            return;
+        }
+        m_gameplayWidget->startMap(map);
+        switchToScreen(Screen_Gameplay);
+    });
+    connect(m_resultsWidget, &ResultsWidget::exitRequested, this, [this]() {
+        switchToScreen(Screen_SongSelect);
+    });
+
+
+
 
     // Editor hub navigation
     connect(m_editorHubWidget, &EditorHubWidget::backRequested, this, [this]() {
@@ -159,10 +206,27 @@ QWidget* MainWindow::createPlaceholderScreen(const QString &title, const QString
 
 void MainWindow::switchToScreen(ScreenIndex index)
 {
-    if (index == Screen_Editor) {
+    if (index == Screen_Editor || index == Screen_Gameplay) {
         AudioManager::instance().stopMusic();
     } else if (m_stackedWidget->currentIndex() == Screen_Editor) {
         m_editorWidget->stopPlayback();
+        if (index == Screen_MainMenu) {
+            AudioManager::instance().playMenuMusic();
+        }
+    } else if (m_stackedWidget->currentIndex() == Screen_Gameplay) {
+        m_gameplayWidget->stopGame();
+        if (index == Screen_SongSelect) {
+            m_songSelectWidget->refreshSongList();
+        } else if (index == Screen_MainMenu) {
+            AudioManager::instance().playMenuMusic();
+        }
+    } else if (m_stackedWidget->currentIndex() == Screen_Results) {
+        if (index == Screen_SongSelect) {
+            m_songSelectWidget->refreshSongList();
+        } else if (index == Screen_MainMenu) {
+            AudioManager::instance().playMenuMusic();
+        }
+    } else if (index == Screen_MainMenu) {
         AudioManager::instance().playMenuMusic();
     }
 
@@ -171,8 +235,33 @@ void MainWindow::switchToScreen(ScreenIndex index)
     if (index == Screen_Editor) {
         m_editorWidget->setFocus();
         m_editorWidget->update();
+    } else if (index == Screen_Gameplay) {
+        m_gameplayWidget->setFocus();
+        m_gameplayWidget->update();
+    } else if (index == Screen_Results) {
+        m_resultsWidget->setFocus();
+        m_resultsWidget->update();
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 void MainWindow::updateFullscreenMode(bool fullscreen)
 {
@@ -207,6 +296,17 @@ void MainWindow::closeEvent(QCloseEvent *event)
 void MainWindow::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
+        if (m_stackedWidget->currentIndex() == Screen_Gameplay) {
+            // GameplayWidget обрабатывает Escape самостоятельно для вызова паузы
+            QMainWindow::keyPressEvent(event);
+            return;
+        }
+
+        if (m_stackedWidget->currentIndex() == Screen_Results) {
+            switchToScreen(Screen_SongSelect);
+            event->accept();
+            return;
+        }
         if (m_stackedWidget->currentIndex() == Screen_Editor) {
             m_editorWidget->maybeSaveAndExit();
             event->accept();

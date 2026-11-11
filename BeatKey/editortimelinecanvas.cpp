@@ -88,14 +88,25 @@ void EditorTimelineCanvas::setCurrentTime(int timeMs)
     update();
 }
 
+int EditorTimelineCanvas::visibleTimeMs() const
+{
+    double pxPerMs = m_pixelsPerSecond / 1000.0;
+    if (pxPerMs <= 0.0001) return 1000;
+    return static_cast<int>(width() / pxPerMs);
+}
+
+int EditorTimelineCanvas::maxScrollTime() const
+{
+    return qMax(0, m_totalDurationMs - visibleTimeMs());
+}
+
 void EditorTimelineCanvas::setScrollTime(int timeMs)
 {
-    int visibleMs = static_cast<int>(width() / (m_pixelsPerSecond / 1000.0));
-    int maxScroll = qMax(0, m_totalDurationMs - visibleMs);
-    int newScroll = qBound(0, timeMs, maxScroll + 2000);
+    int maxScroll = maxScrollTime();
+    int newScroll = qBound(0, timeMs, maxScroll);
     if (newScroll != m_scrollTimeMs) {
         m_scrollTimeMs = newScroll;
-        emit scrollChanged(m_scrollTimeMs, m_totalDurationMs, visibleMs);
+        emit scrollChanged(m_scrollTimeMs, maxScroll, visibleTimeMs());
         updateHoverInfo();
         update();
     }
@@ -220,12 +231,11 @@ void EditorTimelineCanvas::triggerTapFlash(int timeMs)
 
 void EditorTimelineCanvas::updateScrollBounds()
 {
-    int visibleMs = static_cast<int>(width() / (m_pixelsPerSecond / 1000.0));
-    int maxScroll = qMax(0, m_totalDurationMs - visibleMs);
-    if (m_scrollTimeMs > maxScroll + 2000) {
+    int maxScroll = maxScrollTime();
+    if (m_scrollTimeMs > maxScroll) {
         m_scrollTimeMs = maxScroll;
     }
-    emit scrollChanged(m_scrollTimeMs, m_totalDurationMs, visibleMs);
+    emit scrollChanged(m_scrollTimeMs, maxScroll, visibleTimeMs());
 }
 
 void EditorTimelineCanvas::resizeEvent(QResizeEvent *event)

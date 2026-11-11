@@ -99,6 +99,7 @@ private:
     QMediaPlayer *m_musicPlayer;
     QAudioOutput *m_musicOutput;
     QString m_currentTrackSource;
+    qint64 m_pendingPositionMs;
 
     // Preloaded sound effects
     QSoundEffect *m_sfxHit;

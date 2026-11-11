@@ -7,6 +7,42 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QByteArray>
+#include <QStringList>
+
+namespace BeatmapDifficulties {
+    inline const QStringList ALL = {
+        QStringLiteral("Легко"),
+        QStringLiteral("Нормально"),
+        QStringLiteral("Сложно"),
+        QStringLiteral("Эксперт"),
+        QStringLiteral("Мастер")
+    };
+    inline const QString DEFAULT_DIFFICULTY = QStringLiteral("Нормально");
+
+    inline QString canonicalDifficulty(const QString &raw) {
+        QString trimmed = raw.trimmed();
+        if (ALL.contains(trimmed)) {
+            return trimmed;
+        }
+        QString lower = trimmed.toLower();
+        if (lower.startsWith(QStringLiteral("легк")) || lower == QStringLiteral("easy")) {
+            return QStringLiteral("Легко");
+        }
+        if (lower.startsWith(QStringLiteral("норм")) || lower == QStringLiteral("normal")) {
+            return QStringLiteral("Нормально");
+        }
+        if (lower.startsWith(QStringLiteral("сложн")) || lower == QStringLiteral("hard")) {
+            return QStringLiteral("Сложно");
+        }
+        if (lower.startsWith(QStringLiteral("эксперт")) || lower == QStringLiteral("expert")) {
+            return QStringLiteral("Эксперт");
+        }
+        if (lower.startsWith(QStringLiteral("мастер")) || lower.startsWith(QStringLiteral("безумн")) || lower == QStringLiteral("insane")) {
+            return QStringLiteral("Мастер");
+        }
+        return DEFAULT_DIFFICULTY;
+    }
+}
 
 /**
  * @brief NoteData represents a single rhythmic hit object on the track.

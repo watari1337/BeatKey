@@ -150,6 +150,61 @@ QString dangerButtonStyle()
     );
 }
 
+QString easterEggDangerButtonStyle(int step)
+{
+    step = qBound(1, step, 8);
+    int fontSize = qMax(9, 13 - (step - 1));
+    int padV = qMax(1, 4 - (step - 1) / 2);
+    int padH = qMax(4, 12 - (step - 1));
+    return QStringLiteral(
+        "QPushButton {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #b82b4a, stop:1 #e03a60);"
+        "  color: #ffffff;"
+        "  border: 1px solid #ff5577;"
+        "  border-radius: 8px;"
+        "  padding: %1px %2px;"
+        "  font-family: 'Segoe UI', sans-serif;"
+        "  font-size: %3px;"
+        "  font-weight: bold;"
+        "}"
+        "QPushButton:hover {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #d9385c, stop:1 #ff5577);"
+        "}"
+        "QPushButton:pressed {"
+        "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8c1e36, stop:1 #b32a48);"
+        "}"
+    ).arg(padV).arg(padH).arg(fontSize);
+}
+
+QString easterEggCancelButtonStyle(int step)
+{
+    step = qBound(1, step, 8);
+    int fontSize = qMin(18, 13 + (step - 1));
+    int padV = qMin(10, 4 + (step - 1));
+    int padH = qMin(24, 12 + (step - 1) * 2);
+    return QStringLiteral(
+        "QPushButton {"
+        "  background: #2a1b4e;"
+        "  color: #cbb2fe;"
+        "  border: 1px solid #7d44cf;"
+        "  border-radius: 8px;"
+        "  padding: %1px %2px;"
+        "  font-family: 'Segoe UI', sans-serif;"
+        "  font-size: %3px;"
+        "  font-weight: bold;"
+        "}"
+        "QPushButton:hover {"
+        "  background: #3d2a61;"
+        "  border: 1px solid #a259ff;"
+        "  color: #ffffff;"
+        "}"
+        "QPushButton:pressed {"
+        "  background: #1f1633;"
+        "  border: 1px solid #553388;"
+        "}"
+    ).arg(padV).arg(padH).arg(fontSize);
+}
+
 QString menuButtonStyle()
 {
     return QStringLiteral(
@@ -199,6 +254,64 @@ QString menuExitButtonStyle()
         "  background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 rgba(70, 20, 35, 250), stop:1 rgba(100, 30, 55, 250));"
         "  border: 2px solid #cc4466;"
         "}"
+    );
+}
+
+QString dialogCloseButtonStyle()
+{
+    return QStringLiteral(
+        "QPushButton {"
+        "  background: transparent;"
+        "  color: #a09cb0;"
+        "  border: none;"
+        "  font-size: 16px;"
+        "  font-weight: bold;"
+        "  border-radius: 14px;"
+        "}"
+        "QPushButton:hover {"
+        "  background: rgba(255, 255, 255, 0.08);"
+        "  color: #ffffff;"
+        "}"
+        "QPushButton:pressed {"
+        "  background: rgba(255, 255, 255, 0.15);"
+        "  color: #bb9af7;"
+        "}"
+    );
+}
+
+QString dialogTitleStyle()
+{
+    return QStringLiteral(
+        "font-family: 'Segoe UI', sans-serif;"
+        "font-size: 20px;"
+        "font-weight: bold;"
+        "color: #ffffff;"
+        "background: transparent;"
+        "border: none;"
+    );
+}
+
+QString dialogErrorTitleStyle()
+{
+    return QStringLiteral(
+        "font-family: 'Segoe UI', sans-serif;"
+        "font-size: 19px;"
+        "font-weight: bold;"
+        "color: #ff5577;"
+        "background: transparent;"
+        "border: none;"
+    );
+}
+
+QString dialogMessageStyle()
+{
+    return QStringLiteral(
+        "font-family: 'Segoe UI', sans-serif;"
+        "font-size: 14px;"
+        "color: #e0dced;"
+        "line-height: 1.4;"
+        "background: transparent;"
+        "border: none;"
     );
 }
 

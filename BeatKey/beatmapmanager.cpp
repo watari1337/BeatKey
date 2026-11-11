@@ -94,7 +94,11 @@ QVector<Beatmap> BeatmapManager::loadAllFromDirectory(const QString &dirPath, QS
         }
     }
 
-    qDebug() << "[BeatmapManager] Успешно загружено" << result.size() << "карт из" << dirPath;
+    static int s_lastLoadedCount = -1;
+    if (s_lastLoadedCount != result.size()) {
+        s_lastLoadedCount = result.size();
+        qDebug() << "[BeatmapManager] Успешно загружено" << result.size() << "карт из" << dirPath;
+    }
     return result;
 }
 

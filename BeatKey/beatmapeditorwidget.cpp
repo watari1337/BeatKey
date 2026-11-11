@@ -6,6 +6,7 @@
 #include "editorcommands.h"
 #include "editorhelpdialog.h"
 #include "theme.h"
+#include "covermanager.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -217,8 +218,7 @@ void BeatmapEditorWidget::updateCachedBackground()
         bgPixmap = m_currentBeatmap.coverImage;
     }
     if (bgPixmap.isNull()) {
-        static QPixmap defaultBg(QStringLiteral(":/assets/images/standard_bg2.jpg"));
-        bgPixmap = defaultBg;
+        bgPixmap = CoverManager::standardCoverPixmap(CoverManager::StandardCover::Standard2);
     }
     if (bgPixmap.isNull()) {
         m_cachedBackgroundPixmap = QPixmap();
@@ -752,7 +752,7 @@ QWidget* BeatmapEditorWidget::createEditorPage()
     // Scrubber above notes canvas
     m_scrubSlider = new ClickableSlider(Qt::Horizontal, centerContainer);
     m_scrubSlider->setFocusPolicy(Qt::NoFocus);
-    m_scrubSlider->setRange(0, m_totalDurationMs);
+    m_scrubSlider->setRange(0, 0);
     m_scrubSlider->setValue(0);
     m_scrubSlider->setCursor(Qt::PointingHandCursor);
     m_scrubSlider->setStyleSheet(Theme::sliderStyle());
@@ -1190,13 +1190,7 @@ QWidget* BeatmapEditorWidget::createDescriptionPage()
     auto *diffLbl = new QLabel(QStringLiteral("Сложность карты:"), rightCard);
     diffLbl->setStyleSheet(Theme::secondaryLabelStyle());
     m_metaDiffCombo = new QComboBox(rightCard);
-    m_metaDiffCombo->addItems({
-        QStringLiteral("Легкая"),
-        QStringLiteral("Нормальная"),
-        QStringLiteral("Сложная"),
-        QStringLiteral("Эксперт"),
-        QStringLiteral("Безумная")
-    });
+    m_metaDiffCombo->addItems(BeatmapDifficulties::ALL);
     m_metaDiffCombo->setStyleSheet(Theme::comboBoxStyle());
     m_metaDiffCombo->setCursor(Qt::PointingHandCursor);
     connect(m_metaDiffCombo, &QComboBox::currentIndexChanged, this, &BeatmapEditorWidget::handleDifficultyChanged);
@@ -1334,8 +1328,7 @@ void BeatmapEditorWidget::updateCoverPreview()
         pix = m_currentBeatmap.coverImage;
     }
     if (pix.isNull()) {
-        static QPixmap defaultBg(QStringLiteral(":/assets/images/standard_bg2.jpg"));
-        pix = defaultBg;
+        pix = CoverManager::standardCoverPixmap(CoverManager::StandardCover::Standard2);
     }
 
     if (!pix.isNull()) {
@@ -1501,7 +1494,7 @@ void BeatmapEditorWidget::setMapDuration(int durationMs)
     m_timelineCanvas->setTotalDuration(m_totalDurationMs);
 
     if (m_scrubSlider) {
-        m_scrubSlider->setRange(0, m_totalDurationMs);
+        m_scrubSlider->setRange(0, qMax(0, m_timelineCanvas->maxScrollTime()));
     }
     if (m_metaDurationSpin) {
         m_metaDurationSpin->blockSignals(true);
@@ -1540,9 +1533,13 @@ void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &aud
     m_metaMapperEdit->setText(m_currentBeatmap.meta.mapper);
     m_metaArtistEdit->setText(m_currentBeatmap.meta.artist);
 
-    int diffIdx = m_metaDiffCombo->findText(m_currentBeatmap.meta.difficultyName);
+    QString canonicalDiff = BeatmapDifficulties::canonicalDifficulty(m_currentBeatmap.meta.difficultyName);
+    m_currentBeatmap.meta.difficultyName = canonicalDiff;
+    int diffIdx = m_metaDiffCombo->findText(canonicalDiff);
     if (diffIdx != -1) {
         m_metaDiffCombo->setCurrentIndex(diffIdx);
+    } else {
+        m_metaDiffCombo->setCurrentIndex(1);
     }
 
     if (m_currentBeatmap.meta.bpm <= 0.0) {
@@ -1764,16 +1761,16 @@ void BeatmapEditorWidget::handleSeekRequested(int timeMs)
     }
 }
 
-void BeatmapEditorWidget::handleScrollChanged(int scrollTimeMs, int totalDurationMs, int visibleMs)
+void BeatmapEditorWidget::handleScrollChanged(int scrollTimeMs, int maxScrollMs, int visibleMs)
 {
     Q_UNUSED(visibleMs);
     if (!m_isAutoScrolling) {
         m_userScrolledAway = true;
     }
-    if (m_totalDurationMs > 0 && m_scrubSlider && !m_isScrubbing) {
+    if (m_scrubSlider && !m_isScrubbing) {
         m_scrubSlider->blockSignals(true);
-        m_scrubSlider->setRange(0, totalDurationMs);
-        m_scrubSlider->setValue(scrollTimeMs);
+        m_scrubSlider->setRange(0, qMax(0, maxScrollMs));
+        m_scrubSlider->setValue(qBound(0, scrollTimeMs, qMax(0, maxScrollMs)));
         m_scrubSlider->blockSignals(false);
     }
 }
@@ -2187,21 +2184,30 @@ void BeatmapEditorWidget::handleChooseCover()
         this,
         QStringLiteral("Выберите файл обложки карты"),
         desktopPath,
-        QStringLiteral("Изображения (*.png *.jpg *.jpeg);;Все файлы (*.*)")
+        CoverManager::coverFilter()
     );
-    if (!filePath.isEmpty()) {
-        m_isMetadataModified = true;
-        m_sourceCoverPath = filePath;
-        m_currentBeatmap.meta.coverFileName = QFileInfo(filePath).fileName();
-        m_currentBeatmap.coverImage.load(filePath);
-        m_metaCoverLabel->setText(QFileInfo(filePath).fileName());
-        updateCoverPreview();
-        updateCachedBackground();
-        m_saveStatusLabel->setText(QStringLiteral("Обложка карты выбрана!"));
-        m_saveStatusLabel->setVisible(true);
-        QTimer::singleShot(2500, this, [this]() { m_saveStatusLabel->setVisible(false); });
-        update();
+    if (filePath.isEmpty()) {
+        return;
     }
+
+    QPixmap loadedPixmap;
+    QString errorMessage;
+    if (!CoverManager::validateAndLoadCover(filePath, &loadedPixmap, &errorMessage)) {
+        CoverManager::showMediaErrorDialog(this, QStringLiteral("Ошибка выбора обложки"), errorMessage);
+        return;
+    }
+
+    m_isMetadataModified = true;
+    m_sourceCoverPath = filePath;
+    m_currentBeatmap.meta.coverFileName = QFileInfo(filePath).fileName();
+    m_currentBeatmap.coverImage = loadedPixmap;
+    m_metaCoverLabel->setText(QFileInfo(filePath).fileName());
+    updateCoverPreview();
+    updateCachedBackground();
+    m_saveStatusLabel->setText(QStringLiteral("Обложка карты выбрана!"));
+    m_saveStatusLabel->setVisible(true);
+    QTimer::singleShot(2500, this, [this]() { m_saveStatusLabel->setVisible(false); });
+    update();
 }
 
 void BeatmapEditorWidget::handleChooseAudio()
@@ -2212,35 +2218,42 @@ void BeatmapEditorWidget::handleChooseAudio()
         this,
         QStringLiteral("Выберите аудиофайл для карты"),
         desktopPath,
-        QStringLiteral("Музыкальные файлы (*.wav *.mp3 *.ogg);;Все файлы (*.*)")
+        CoverManager::audioFilter()
     );
-    if (!filePath.isEmpty()) {
-        m_isMetadataModified = true;
-        m_sourceAudioPath = filePath;
-        m_currentBeatmap.meta.audioFileName = QFileInfo(filePath).fileName();
-        if (m_metaAudioLabel) {
-            m_metaAudioLabel->setText(QFileInfo(filePath).fileName());
-        }
-        if (m_descAudioPathLabel) {
-            m_descAudioPathLabel->setText(QFileInfo(filePath).fileName());
-        }
-
-        // Stop current playback if active
-        if (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState) {
-            m_mediaPlayer->stop();
-        }
-
-        // Load new audio source into player and waveform decoder
-        m_mediaPlayer->setSource(QUrl::fromLocalFile(filePath));
-        m_waveform->load(filePath);
-
-        m_saveStatusLabel->setText(QStringLiteral("Аудиофайл карты обновлен!"));
-        m_saveStatusLabel->setVisible(true);
-        QTimer::singleShot(2500, this, [this]() { m_saveStatusLabel->setVisible(false); });
-        update();
+    if (filePath.isEmpty()) {
+        return;
     }
-}
 
+    QString errorMessage;
+    if (!CoverManager::validateAudioFile(filePath, &errorMessage)) {
+        CoverManager::showMediaErrorDialog(this, QStringLiteral("Ошибка выбора аудиофайла"), errorMessage);
+        return;
+    }
+
+    m_isMetadataModified = true;
+    m_sourceAudioPath = filePath;
+    m_currentBeatmap.meta.audioFileName = QFileInfo(filePath).fileName();
+    if (m_metaAudioLabel) {
+        m_metaAudioLabel->setText(QFileInfo(filePath).fileName());
+    }
+    if (m_descAudioPathLabel) {
+        m_descAudioPathLabel->setText(QFileInfo(filePath).fileName());
+    }
+
+    // Stop current playback if active
+    if (m_mediaPlayer->playbackState() == QMediaPlayer::PlayingState) {
+        m_mediaPlayer->stop();
+    }
+
+    // Load new audio source into player and waveform decoder
+    m_mediaPlayer->setSource(QUrl::fromLocalFile(filePath));
+    m_waveform->load(filePath);
+
+    m_saveStatusLabel->setText(QStringLiteral("Аудиофайл карты обновлен!"));
+    m_saveStatusLabel->setVisible(true);
+    QTimer::singleShot(2500, this, [this]() { m_saveStatusLabel->setVisible(false); });
+    update();
+}
 // ============================================================================
 // Data Structure Validation & Export
 // ============================================================================
@@ -2275,11 +2288,6 @@ bool BeatmapEditorWidget::validateMapData(QString *errorMessage)
     QString audioExt = QFileInfo(m_sourceAudioPath).suffix().toLower();
     if (audioExt != QStringLiteral("mp3") && audioExt != QStringLiteral("wav") && audioExt != QStringLiteral("ogg")) {
         if (errorMessage) *errorMessage = QStringLiteral("Неподдерживаемый аудиоформат '%1'. Поддерживаются .mp3, .wav, .ogg.").arg(audioExt);
-        return false;
-    }
-
-    if (m_currentBeatmap.notes.isEmpty()) {
-        if (errorMessage) *errorMessage = QStringLiteral("Карта не содержит нот. Разместите хотя бы одну ноту на таймлайне.");
         return false;
     }
 
@@ -2386,7 +2394,48 @@ void BeatmapEditorWidget::handleExportBkey()
 void BeatmapEditorWidget::keyPressEvent(QKeyEvent *event)
 {
     // Ctrl+S quick save
-    if ((event->modifiers() & Qt::ControlModifier) && event->key() == Qt::Key_S) {
+    Qt::Key normKey = SettingsManager::normalizeKey(event);
+    if ((event->modifiers() & Qt::ControlModifier)) {
+        if (normKey == Qt::Key_S || event->key() == Qt::Key_S) {
+            handleSaveMap();
+            event->accept();
+            return;
+        } else if (normKey == Qt::Key_Z) {
+            if (event->modifiers() & Qt::ShiftModifier) {
+                handleRedo();
+            } else {
+                handleUndo();
+            }
+            event->accept();
+            return;
+        } else if (normKey == Qt::Key_Y) {
+            handleRedo();
+            event->accept();
+            return;
+        } else if (normKey == Qt::Key_A) {
+            m_timelineCanvas->selectAll();
+            event->accept();
+            return;
+        }
+    }
+
+    if (event->modifiers() == Qt::NoModifier) {
+        if (normKey == Qt::Key_1) {
+            if (m_selectToolBtn) m_selectToolBtn->click();
+            event->accept();
+            return;
+        } else if (normKey == Qt::Key_2) {
+            if (m_placeToolBtn) m_placeToolBtn->click();
+            event->accept();
+            return;
+        } else if (normKey == Qt::Key_Space) {
+            handlePlayPauseToggle();
+            event->accept();
+            return;
+        }
+    }
+
+    if (false) {
         handleSaveMap();
         event->accept();
         return;
@@ -2397,8 +2446,8 @@ void BeatmapEditorWidget::keyPressEvent(QKeyEvent *event)
         Qt::Key k1 = SettingsManager::instance().primaryKey();
         Qt::Key k2 = SettingsManager::instance().secondaryKey();
 
-        if (event->key() == k1 ||
-            event->key() == k2) {
+        if (SettingsManager::isKeyMatching(event, k1) ||
+            SettingsManager::isKeyMatching(event, k2)) {
 
             int currentAudioMs = static_cast<int>(m_mediaPlayer->position());
             int snappedMs = m_timelineCanvas->snapTime(currentAudioMs);
