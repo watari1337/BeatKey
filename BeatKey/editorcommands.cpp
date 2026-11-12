@@ -84,10 +84,11 @@ void MoveNotesCommand::redo()
 // BatchAddNotesCommand (Tap Record)
 // ============================================================================
 
-BatchAddNotesCommand::BatchAddNotesCommand(BeatmapEditorWidget *editor, const QVector<NoteData> &notes, QUndoCommand *parent)
+BatchAddNotesCommand::BatchAddNotesCommand(BeatmapEditorWidget *editor, const QVector<NoteData> &notes, bool alreadyExecuted, QUndoCommand *parent)
     : QUndoCommand(parent)
     , m_editor(editor)
     , m_notes(notes)
+    , m_alreadyExecuted(alreadyExecuted)
 {
     setText(QStringLiteral("Запись (Tap Record: %1 нот)").arg(notes.size()));
 }
@@ -101,6 +102,10 @@ void BatchAddNotesCommand::undo()
 
 void BatchAddNotesCommand::redo()
 {
+    if (m_alreadyExecuted) {
+        m_alreadyExecuted = false;
+        return;
+    }
     if (m_editor) {
         m_editor->executeBatchAddNotes(m_notes);
     }

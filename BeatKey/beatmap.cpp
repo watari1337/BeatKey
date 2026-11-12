@@ -6,9 +6,9 @@
 #include <QFileInfo>
 #include <algorithm>
 
-// ============================================================================
+// ===========================================================================
 // NoteData Serialization
-// ============================================================================
+// ===========================================================================
 
 QJsonObject NoteData::toJson() const
 {
@@ -116,8 +116,12 @@ QByteArray Beatmap::toJson(bool indented) const
     root[QStringLiteral("gameplay")] = gameplay.toJson();
 
     QJsonArray notesArray;
+    int lastTimeMs = -99999;
     for (const auto &note : notes) {
-        notesArray.append(note.toJson());
+        if (lastTimeMs < 0 || qAbs(note.timeMs - lastTimeMs) > 10) {
+            notesArray.append(note.toJson());
+            lastTimeMs = note.timeMs;
+        }
     }
     root[QStringLiteral("notes")] = notesArray;
 
@@ -202,6 +206,16 @@ Beatmap Beatmap::fromJson(const QByteArray &jsonData, QString *error)
     std::sort(map.notes.begin(), map.notes.end(), [](const NoteData &a, const NoteData &b) {
         return a.timeMs < b.timeMs;
     });
+
+    // Удаление дубликатов нот с одинаковым временем
+    QVector<NoteData> deduplicatedNotes;
+    deduplicatedNotes.reserve(map.notes.size());
+    for (const auto &note : map.notes) {
+        if (deduplicatedNotes.isEmpty() || qAbs(note.timeMs - deduplicatedNotes.last().timeMs) > 10) {
+            deduplicatedNotes.append(note);
+        }
+    }
+    map.notes = deduplicatedNotes;
 
     map.isValid = true;
     return map;

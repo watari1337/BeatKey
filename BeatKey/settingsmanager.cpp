@@ -25,6 +25,7 @@ SettingsManager::SettingsManager(QObject *parent)
     , m_windowHeight(720)
     , m_bgDimPercent(DEFAULT_BG_DIM_PERCENT)
     , m_bgBlurRadius(DEFAULT_BG_BLUR_RADIUS)
+    , m_editorHitsoundsEnabled(true)
 {
     QString appDir = QCoreApplication::applicationDirPath();
     m_configPath = appDir + QDir::separator() + QStringLiteral("settings.ini");
@@ -74,6 +75,9 @@ void SettingsManager::loadSettings()
     m_bgDimPercent = std::clamp(settings.value(QStringLiteral("Graphics/BgDim"), DEFAULT_BG_DIM_PERCENT).toInt(), 0, 100);
     m_bgBlurRadius = std::clamp(settings.value(QStringLiteral("Graphics/BgBlur"), DEFAULT_BG_BLUR_RADIUS).toInt(), 0, 20);
 
+    // Editor Settings
+    m_editorHitsoundsEnabled = settings.value(QStringLiteral("Editor/HitsoundsEnabled"), true).toBool();
+
     qDebug() << "[SettingsManager] Loaded config from" << m_configPath
              << "| Nickname:" << m_nickname
              << "| PrimaryKey:" << keyToString(m_primaryKey)
@@ -101,6 +105,7 @@ void SettingsManager::saveSettings()
 
     settings.setValue(QStringLiteral("Graphics/BgDim"), m_bgDimPercent);
     settings.setValue(QStringLiteral("Graphics/BgBlur"), m_bgBlurRadius);
+    settings.setValue(QStringLiteral("Editor/HitsoundsEnabled"), m_editorHitsoundsEnabled);
 
     settings.sync();
     qDebug() << "[SettingsManager] Settings successfully saved to" << m_configPath;
@@ -121,6 +126,7 @@ void SettingsManager::resetToDefaults()
     m_windowHeight = 720;
     m_bgDimPercent = DEFAULT_BG_DIM_PERCENT;
     m_bgBlurRadius = DEFAULT_BG_BLUR_RADIUS;
+    m_editorHitsoundsEnabled = true;
 
     saveSettings();
 
@@ -131,6 +137,7 @@ void SettingsManager::resetToDefaults()
     emit audioOffsetChanged(m_audioOffsetMs);
     emit bgDimPercentChanged(m_bgDimPercent);
     emit bgBlurRadiusChanged(m_bgBlurRadius);
+    emit editorHitsoundsEnabledChanged(m_editorHitsoundsEnabled);
     emit keyBindingsChanged(m_primaryKey, m_secondaryKey);
     emit fullscreenChanged(m_fullscreen);
     emit settingsReset();
@@ -389,5 +396,19 @@ void SettingsManager::setBgBlurRadius(int radius)
     if (m_bgBlurRadius != radius) {
         m_bgBlurRadius = radius;
         emit bgBlurRadiusChanged(m_bgBlurRadius);
+    }
+}
+
+bool SettingsManager::editorHitsoundsEnabled() const
+{
+    return m_editorHitsoundsEnabled;
+}
+
+void SettingsManager::setEditorHitsoundsEnabled(bool enabled)
+{
+    if (m_editorHitsoundsEnabled != enabled) {
+        m_editorHitsoundsEnabled = enabled;
+        saveSettings();
+        emit editorHitsoundsEnabledChanged(m_editorHitsoundsEnabled);
     }
 }

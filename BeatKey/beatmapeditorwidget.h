@@ -9,6 +9,7 @@
 #include <QScrollArea>
 #include <QStackedWidget>
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QDoubleSpinBox>
@@ -136,6 +137,7 @@ private:
     int calculateLastNoteTime() const;
     void recalculateMapDuration(int audioDurationMs = 0);
     void setMapDuration(int durationMs);
+    void updateAudioVolumes();
 
     // Data
     Beatmap m_currentBeatmap;
@@ -251,6 +253,10 @@ private:
     QLabel *m_selCountLabel;
     QLabel *m_selTimeLabel;
     QPushButton *m_selDeleteBtn;
+
+    // Playback & Hitsounds Option
+    QCheckBox *m_playHitsoundsCheckBox;
+    double m_lastHitSoundCheckTimeMs;
 
     // Statistics Widgets
     QLabel *m_statTotalNotes;

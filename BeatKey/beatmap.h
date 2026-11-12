@@ -63,7 +63,7 @@ struct BeatmapMeta {
     QString artist;              // Исполнитель (1-100 символов)
     QString mapper;              // Автор разметки карты (1-50 символов)
     QString difficultyName;      // Наименование сложности (Easy, Normal, Hard и т.д.)
-    double bpm = 120.0;          // Темп в ударах в минуту (30.0 - 300.0)
+    double bpm = 120.0;          // Темп в ударах в минуту (30.0 - 1999.0)
     int audioOffset = 0;         // Смещение первого такта в мс
     QString audioFileName;       // Имя аудиофайла внутри пакета (.mp3, .wav, .ogg)
     QString coverFileName;       // Имя файла обложки внутри пакета (.png, .jpg)

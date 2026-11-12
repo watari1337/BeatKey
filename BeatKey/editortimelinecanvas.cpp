@@ -62,7 +62,7 @@ void EditorTimelineCanvas::setNotes(const QVector<NoteData> &notes)
 
 void EditorTimelineCanvas::setBpm(double bpm)
 {
-    m_bpm = qBound(30.0, bpm, 300.0);
+    m_bpm = qBound(30.0, bpm, 1999.0);
     update();
 }
 

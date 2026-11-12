@@ -78,6 +78,10 @@ public:
     int bgBlurRadius() const;
     void setBgBlurRadius(int radius);
 
+    // Editor Settings
+    bool editorHitsoundsEnabled() const;
+    void setEditorHitsoundsEnabled(bool enabled);
+
     // Helpers
     static QString keyToString(Qt::Key key);
     static Qt::Key stringToKey(const QString &str);
@@ -95,6 +99,7 @@ signals:
     void fullscreenChanged(bool fullscreen);
     void bgDimPercentChanged(int percent);
     void bgBlurRadiusChanged(int radius);
+    void editorHitsoundsEnabledChanged(bool enabled);
     void settingsReset();
     void settingsSaved();
 
@@ -119,6 +124,7 @@ private:
     int m_windowHeight;
     int m_bgDimPercent;
     int m_bgBlurRadius;
+    bool m_editorHitsoundsEnabled;
 };
 
 #endif // SETTINGSMANAGER_H

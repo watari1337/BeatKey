@@ -306,7 +306,7 @@ void NewBeatmapDialog::setupUi()
     bpmCol->setSpacing(4);
     bpmCol->addWidget(createFieldLabel(QStringLiteral("Темп (BPM)"), m_advancedContainer));
     m_bpmSpin = new QDoubleSpinBox(m_advancedContainer);
-    m_bpmSpin->setRange(30.0, 300.0);
+    m_bpmSpin->setRange(30.0, 1999.0);
     m_bpmSpin->setValue(120.0);
     m_bpmSpin->setSingleStep(1.0);
     m_bpmSpin->setDecimals(1);

@@ -47,13 +47,14 @@ private:
 class BatchAddNotesCommand : public QUndoCommand
 {
 public:
-    BatchAddNotesCommand(BeatmapEditorWidget *editor, const QVector<NoteData> &notes, QUndoCommand *parent = nullptr);
+    BatchAddNotesCommand(BeatmapEditorWidget *editor, const QVector<NoteData> &notes, bool alreadyExecuted = false, QUndoCommand *parent = nullptr);
     void undo() override;
     void redo() override;
 
 private:
     BeatmapEditorWidget *m_editor;
     QVector<NoteData> m_notes;
+    bool m_alreadyExecuted;
 };
 
 #endif // EDITORCOMMANDS_H

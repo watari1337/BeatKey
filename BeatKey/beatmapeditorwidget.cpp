@@ -104,6 +104,8 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     , m_selCountLabel(nullptr)
     , m_selTimeLabel(nullptr)
     , m_selDeleteBtn(nullptr)
+    , m_playHitsoundsCheckBox(nullptr)
+    , m_lastHitSoundCheckTimeMs(-1.0)
     , m_statTotalNotes(nullptr)
     , m_statDuration(nullptr)
     , m_statNps(nullptr)
@@ -112,7 +114,12 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     setFocusPolicy(Qt::StrongFocus);
 
     m_mediaPlayer->setAudioOutput(m_audioOutput);
-    m_audioOutput->setVolume(SettingsManager::instance().musicVolume() / 100.0f);
+    updateAudioVolumes();
+
+    connect(&SettingsManager::instance(), &SettingsManager::masterVolumeChanged,
+            this, &BeatmapEditorWidget::updateAudioVolumes);
+    connect(&SettingsManager::instance(), &SettingsManager::musicVolumeChanged,
+            this, &BeatmapEditorWidget::updateAudioVolumes);
 
     m_playbackTimer->setTimerType(Qt::PreciseTimer);
     connect(m_playbackTimer, &QTimer::timeout, this, &BeatmapEditorWidget::updatePlaybackTick);
@@ -151,11 +158,13 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
             m_clockBaseMs = m_mediaPlayer->position();
             m_lastMediaPos = m_clockBaseMs;
             m_lastReportedPlaybackMs = static_cast<double>(m_clockBaseMs);
+            m_lastHitSoundCheckTimeMs = static_cast<double>(m_clockBaseMs);
             m_playbackTimer->start(1);
         } else {
             m_playBtn->setText(QStringLiteral("▶"));
             m_playbackTimer->stop();
             m_audioClock.invalidate();
+            m_lastHitSoundCheckTimeMs = -1.0;
             if (m_isTapRecording) {
                 // If stopped while recording, commit session
                 handleToggleTapRecord();
@@ -194,9 +203,22 @@ BeatmapEditorWidget::~BeatmapEditorWidget()
     stopPlayback();
 }
 
+void BeatmapEditorWidget::updateAudioVolumes()
+{
+    float master = SettingsManager::instance().masterVolume() / 100.0f;
+    float music = SettingsManager::instance().musicVolume() / 100.0f;
+    if (m_audioOutput) {
+        m_audioOutput->setVolume(std::clamp(master * music, 0.0f, 1.0f));
+    }
+}
+
 void BeatmapEditorWidget::showEvent(QShowEvent *event)
 {
     QWidget::showEvent(event);
+    updateAudioVolumes();
+    if (m_playHitsoundsCheckBox) {
+        m_playHitsoundsCheckBox->setChecked(SettingsManager::instance().editorHitsoundsEnabled());
+    }
     if (m_tabEditorBtn) {
         m_tabEditorBtn->setChecked(true);
     }
@@ -875,7 +897,7 @@ QWidget* BeatmapEditorWidget::createEditorPage()
     bpmLbl->setStyleSheet(Theme::secondaryLabelStyle());
     m_sideBpmSpin = new QDoubleSpinBox(scrollContent);
     m_sideBpmSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
-    m_sideBpmSpin->setRange(30.0, 300.0);
+    m_sideBpmSpin->setRange(30.0, 1999.0);
     m_sideBpmSpin->setValue(120.0);
     m_sideBpmSpin->setSingleStep(1.0);
     m_sideBpmSpin->setAlignment(Qt::AlignCenter);
@@ -1018,6 +1040,30 @@ QWidget* BeatmapEditorWidget::createEditorPage()
     m_selDeleteBtn->setEnabled(false);
     connect(m_selDeleteBtn, &QPushButton::clicked, this, &BeatmapEditorWidget::handleDeleteSelection);
     rightLayout->addWidget(m_selDeleteBtn);
+
+    // Section: Playback / Audio Options
+    auto *sepHit = new QFrame(scrollContent);
+    sepHit->setFrameShape(QFrame::HLine);
+    sepHit->setStyleSheet(QStringLiteral("background: #5a388f; max-height: 1px;"));
+    rightLayout->addWidget(sepHit);
+
+    auto *playSec = new QLabel(QStringLiteral("ВОСПРОИЗВЕДЕНИЕ"), scrollContent);
+    playSec->setStyleSheet(Theme::cardHeaderStyle());
+    rightLayout->addWidget(playSec);
+
+    m_playHitsoundsCheckBox = new QCheckBox(QStringLiteral("Звук попадания по нотам"), scrollContent);
+    m_playHitsoundsCheckBox->setStyleSheet(Theme::checkBoxStyle());
+    m_playHitsoundsCheckBox->setCursor(Qt::PointingHandCursor);
+    m_playHitsoundsCheckBox->setChecked(SettingsManager::instance().editorHitsoundsEnabled());
+    connect(m_playHitsoundsCheckBox, &QCheckBox::toggled, this, [](bool checked) {
+        SettingsManager::instance().setEditorHitsoundsEnabled(checked);
+    });
+    connect(&SettingsManager::instance(), &SettingsManager::editorHitsoundsEnabledChanged, this, [this](bool enabled) {
+        if (m_playHitsoundsCheckBox && m_playHitsoundsCheckBox->isChecked() != enabled) {
+            m_playHitsoundsCheckBox->setChecked(enabled);
+        }
+    });
+    rightLayout->addWidget(m_playHitsoundsCheckBox);
 
     // Section 3: Map Statistics
     auto *sep3 = new QFrame(scrollContent);
@@ -1211,7 +1257,7 @@ QWidget* BeatmapEditorWidget::createDescriptionPage()
     bpmLbl->setStyleSheet(Theme::secondaryLabelStyle());
     m_metaBpmSpin = new QDoubleSpinBox(rightCard);
     m_metaBpmSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
-    m_metaBpmSpin->setRange(30.0, 300.0);
+    m_metaBpmSpin->setRange(30.0, 1999.0);
     m_metaBpmSpin->setValue(120.0);
     m_metaBpmSpin->setSingleStep(1.0);
     m_metaBpmSpin->setAlignment(Qt::AlignCenter);
@@ -1620,6 +1666,7 @@ void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &aud
     m_timelineCanvas->setBpm(m_currentBeatmap.meta.bpm);
     m_timelineCanvas->setAudioOffset(m_currentBeatmap.meta.audioOffset);
     m_timelineCanvas->setCurrentTime(0);
+    m_lastHitSoundCheckTimeMs = 0.0;
     m_userScrolledAway = false;
     m_isAutoScrolling = false;
     m_timelineCanvas->setScrollTime(0);
@@ -1653,6 +1700,7 @@ void BeatmapEditorWidget::stopPlayback()
     m_clockBaseMs = 0;
     m_lastMediaPos = -1;
     m_lastReportedPlaybackMs = 0.0;
+    m_lastHitSoundCheckTimeMs = -1.0;
     m_timelineCanvas->setCurrentTime(0);
     m_userScrolledAway = false;
     m_playheadInViewMs = 0;
@@ -1676,6 +1724,7 @@ void BeatmapEditorWidget::handlePlayPauseToggle()
         m_clockBaseMs = currentMs;
         m_lastMediaPos = currentMs;
         m_lastReportedPlaybackMs = static_cast<double>(currentMs);
+        m_lastHitSoundCheckTimeMs = static_cast<double>(currentMs);
         if (m_audioClock.isValid()) {
             m_audioClock.restart();
         }
@@ -1750,6 +1799,7 @@ void BeatmapEditorWidget::handleSeekRequested(int timeMs)
     m_clockBaseMs = timeMs;
     m_lastMediaPos = timeMs;
     m_lastReportedPlaybackMs = static_cast<double>(timeMs);
+    m_lastHitSoundCheckTimeMs = static_cast<double>(timeMs);
     if (m_audioClock.isValid()) {
         m_audioClock.restart();
     }
@@ -1917,6 +1967,13 @@ void BeatmapEditorWidget::handleRedo()
 
 void BeatmapEditorWidget::executeAddNote(const NoteData &note)
 {
+    // Prevent duplicate notes within 15ms
+    for (const auto &n : m_currentBeatmap.notes) {
+        if (qAbs(n.timeMs - note.timeMs) <= 15) {
+            return;
+        }
+    }
+
     m_currentBeatmap.notes.append(note);
     std::sort(m_currentBeatmap.notes.begin(), m_currentBeatmap.notes.end(), [](const NoteData &a, const NoteData &b) {
         return a.timeMs < b.timeMs;
@@ -2008,7 +2065,16 @@ void BeatmapEditorWidget::executeMoveNotes(const QVector<int> &originalTimes, in
 void BeatmapEditorWidget::executeBatchAddNotes(const QVector<NoteData> &notes)
 {
     for (const auto &n : notes) {
-        m_currentBeatmap.notes.append(n);
+        bool exists = false;
+        for (const auto &cn : m_currentBeatmap.notes) {
+            if (qAbs(cn.timeMs - n.timeMs) <= 15) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            m_currentBeatmap.notes.append(n);
+        }
     }
     std::sort(m_currentBeatmap.notes.begin(), m_currentBeatmap.notes.end(), [](const NoteData &a, const NoteData &b) {
         return a.timeMs < b.timeMs;
@@ -2084,7 +2150,7 @@ void BeatmapEditorWidget::handleToggleTapRecord()
 
         // Commit recorded notes to Undo stack
         if (!m_tapRecordSessionNotes.isEmpty()) {
-            m_undoStack.push(new BatchAddNotesCommand(this, m_tapRecordSessionNotes));
+            m_undoStack.push(new BatchAddNotesCommand(this, m_tapRecordSessionNotes, true));
             m_tapRecordSessionNotes.clear();
         }
     }
@@ -2312,8 +2378,8 @@ bool BeatmapEditorWidget::validateMapData(QString *errorMessage)
         return false;
     }
 
-    if (m_currentBeatmap.meta.bpm < 30.0 || m_currentBeatmap.meta.bpm > 300.0) {
-        if (errorMessage) *errorMessage = QStringLiteral("Значение BPM должно находиться в диапазоне от 30.0 до 300.0.");
+    if (m_currentBeatmap.meta.bpm < 30.0 || m_currentBeatmap.meta.bpm > 1999.0) {
+        if (errorMessage) *errorMessage = QStringLiteral("Значение BPM должно находиться в диапазоне от 30.0 до 1999.0.");
         m_metaBpmSpin->setFocus();
         return false;
     }
@@ -2481,6 +2547,11 @@ void BeatmapEditorWidget::keyPressEvent(QKeyEvent *event)
 
     // Tap Record active: capture configured rhythm keys and Space
     if (m_isTapRecording) {
+        if (event->isAutoRepeat()) {
+            event->accept();
+            return;
+        }
+
         Qt::Key k1 = SettingsManager::instance().primaryKey();
         Qt::Key k2 = SettingsManager::instance().secondaryKey();
 
@@ -2549,6 +2620,31 @@ void BeatmapEditorWidget::updatePlaybackTick()
         }
 
         preciseTimeMs = qBound(0.0, preciseTimeMs, static_cast<double>(m_totalDurationMs));
+
+        // Hitsound playback when crossing notes during playback
+        if (m_playHitsoundsCheckBox && m_playHitsoundsCheckBox->isChecked()) {
+            double prevTime = m_lastHitSoundCheckTimeMs;
+            if (prevTime < 0.0 || preciseTimeMs < prevTime || (preciseTimeMs - prevTime) > 100.0) {
+                m_lastHitSoundCheckTimeMs = preciseTimeMs;
+            } else {
+                bool hitTriggered = false;
+                for (const auto &note : m_currentBeatmap.notes) {
+                    if (note.timeMs > prevTime && note.timeMs <= preciseTimeMs) {
+                        if (!hitTriggered) {
+                            AudioManager::instance().playHitSound();
+                            hitTriggered = true;
+                        }
+                        m_timelineCanvas->triggerTapFlash(note.timeMs);
+                    }
+                    if (note.timeMs > preciseTimeMs) {
+                        break;
+                    }
+                }
+                m_lastHitSoundCheckTimeMs = preciseTimeMs;
+            }
+        } else {
+            m_lastHitSoundCheckTimeMs = preciseTimeMs;
+        }
 
         m_timelineCanvas->setCurrentTime(preciseTimeMs);
         updateTimeDisplay(static_cast<int>(preciseTimeMs));

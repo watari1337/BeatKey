@@ -721,6 +721,37 @@ QString pauseGlassCardStyle()
     );
 }
 
+QString checkBoxStyle()
+{
+    return QStringLiteral(
+        "QCheckBox {"
+        "  color: #dddddd;"
+        "  font-family: 'Segoe UI', sans-serif;"
+        "  font-size: 12px;"
+        "  spacing: 8px;"
+        "  background: transparent;"
+        "}"
+        "QCheckBox:hover {"
+        "  color: #ffffff;"
+        "}"
+        "QCheckBox::indicator {"
+        "  width: 16px;"
+        "  height: 16px;"
+        "  border: 1.5px solid #7d44cf;"
+        "  border-radius: 4px;"
+        "  background: #1c1430;"
+        "}"
+        "QCheckBox::indicator:hover {"
+        "  border-color: #a259ff;"
+        "  background: #251b3d;"
+        "}"
+        "QCheckBox::indicator:checked {"
+        "  background: #a259ff;"
+        "  border-color: #bb9af7;"
+        "}"
+    );
+}
+
 } // namespace Theme
 
 // ============================================================================
