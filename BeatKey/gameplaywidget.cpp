@@ -923,10 +923,15 @@ void GameplayWidget::handleHitAction()
             color = Theme::Colors::Warning;
         }
 
+        int comboBeforeHit = m_combo;
         m_combo++;
         if (m_combo > m_maxCombo) m_maxCombo = m_combo;
-        int comboMultiplier = 1 + std::min(m_combo, 100) / 25;
-        m_score += baseScore * comboMultiplier;
+
+        // По ТЗ 4.7.6: HitScore = BaseScore * (1 + min(Combo, 100) / 25)
+        // Combo - текущее значение серии комбо до фиксации текущего удара (для первого удара combo = 0)
+        double comboMultiplier = 1.0 + (std::min(comboBeforeHit, 100) / 25.0);
+        int hitScore = static_cast<int>(std::round(baseScore * comboMultiplier));
+        m_score += hitScore;
 
         m_hp = qBound(0, m_hp + hpDelta, 100);
         spawnFloatingJudgment(text, color);
