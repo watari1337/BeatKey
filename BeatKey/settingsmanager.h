@@ -53,6 +53,9 @@ public:
     int sfxVolume() const;
     void setSfxVolume(int volume);
 
+    float effectiveMusicVolume() const;
+    float effectiveSfxVolume() const;
+
     int audioOffsetMs() const;
     void setAudioOffsetMs(int offsetMs);
 

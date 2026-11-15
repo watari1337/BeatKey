@@ -1,4 +1,5 @@
 #include "beatmapmanager.h"
+#include "covermanager.h"
 
 #include <QtCore/private/qzipreader_p.h>
 #include <QtCore/private/qzipwriter_p.h>
@@ -14,6 +15,7 @@
 #include <QRandomGenerator>
 #include <QBuffer>
 #include <QCoreApplication>
+#include <QSet>
 
 
 BeatmapManager& BeatmapManager::instance()
@@ -82,10 +84,32 @@ QVector<Beatmap> BeatmapManager::loadAllFromDirectory(const QString &dirPath, QS
     QFileInfoList fileList = dir.entryInfoList(filters, QDir::Files, QDir::Name);
 
     result.reserve(fileList.size());
+    QSet<QString> currentDiskPaths;
+
     for (const QFileInfo &fileInfo : fileList) {
+        QString absPath = fileInfo.absoluteFilePath();
+        currentDiskPaths.insert(absPath);
+
+        // Проверяем наличие в in-memory кэше и совпадение времени модификации и размера
+        auto it = m_cachedBeatmaps.find(absPath);
+        if (it != m_cachedBeatmaps.end() &&
+            it.value().lastModified == fileInfo.lastModified() &&
+            it.value().fileSize == fileInfo.size() &&
+            it.value().map.isValid)
+        {
+            result.append(it.value().map);
+            continue;
+        }
+
+        // Кэш отсутствует или файл был изменен на диске - выполняем загрузку
         QString loadError;
-        Beatmap map = loadFromFile(fileInfo.absoluteFilePath(), &loadError);
+        Beatmap map = loadFromFile(absPath, &loadError);
         if (map.isValid) {
+            CachedBeatmap cb;
+            cb.map = map;
+            cb.lastModified = fileInfo.lastModified();
+            cb.fileSize = fileInfo.size();
+            m_cachedBeatmaps.insert(absPath, cb);
             result.append(map);
         } else {
             QString fullErrMsg = QStringLiteral("[%1] %2").arg(fileInfo.fileName(), loadError);
@@ -94,10 +118,19 @@ QVector<Beatmap> BeatmapManager::loadAllFromDirectory(const QString &dirPath, QS
         }
     }
 
+    // Удаляем из кэша карты, файлы которых были удалены с диска
+    for (auto it = m_cachedBeatmaps.begin(); it != m_cachedBeatmaps.end(); ) {
+        if (!currentDiskPaths.contains(it.key())) {
+            it = m_cachedBeatmaps.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
     static int s_lastLoadedCount = -1;
     if (s_lastLoadedCount != result.size()) {
         s_lastLoadedCount = result.size();
-        qDebug() << "[BeatmapManager] Успешно загружено" << result.size() << "карт из" << dirPath;
+        qDebug() << "[BeatmapManager] Актуализировано" << result.size() << "карт из" << dirPath;
     }
     return result;
 }
@@ -340,6 +373,17 @@ Beatmap BeatmapManager::loadFromFile(const QString &bkeyFilePath, QString *error
         return map;
     }
 
+    // Проверка внутренней структуры и корректности аудиопотока
+    QString audioValidateErr;
+    if (!CoverManager::validateAudioData(audioBytes, audioExt, &audioValidateErr)) {
+        QString err = QStringLiteral("Ошибка валидации карты .bkey: аудиофайл '%1' поврежден или имеет некорректный формат (%2).")
+                          .arg(map.meta.audioFileName, audioValidateErr);
+        if (error) *error = err;
+        map.errorMessage = err;
+        map.isValid = false;
+        return map;
+    }
+
     // 5. Загрузка файла обложки (если есть)
     if (!map.meta.coverFileName.isEmpty()) {
         QByteArray coverBytes = extractZipFileData(reader, map.meta.coverFileName);
@@ -432,6 +476,15 @@ bool BeatmapManager::exportToFile(const QString &outBkeyPath,
         return false;
     }
 
+    // Глубокая валидация структуры аудиофайла перед экспортом
+    QString audioValidateErr;
+    if (!CoverManager::validateAudioFile(audioSourcePath, &audioValidateErr)) {
+        QString err = QStringLiteral("Аудиофайл '%1' поврежден или не является корректным аудио: %2")
+                          .arg(audioSourcePath, audioValidateErr);
+        if (error) *error = err;
+        return false;
+    }
+
     QFile audioFile(audioSourcePath);
     if (!audioFile.open(QIODevice::ReadOnly)) {
         QString err = QStringLiteral("Не удалось прочитать аудиофайл '%1'.").arg(audioSourcePath);
@@ -476,6 +529,7 @@ bool BeatmapManager::exportToFile(const QString &outBkeyPath,
         if (error) *error = err;
         return false;
     }
+    writer.setCompressionPolicy(QZipWriter::AutoCompress);
 
     writer.addFile(QStringLiteral("map.json"), finalJson);
     writer.addFile(beatmap.meta.audioFileName, audioBytes);
@@ -509,6 +563,31 @@ bool BeatmapManager::exportToFile(const QString &outBkeyPath,
     }
     beatmap.extractedAudioPath = cachedAudioPath;
 
+    // Обновляем запись карты в памяти кэша менеджера
+    QFileInfo savedInfo(outBkeyPath);
+    CachedBeatmap cb;
+    cb.map = beatmap;
+    cb.lastModified = savedInfo.lastModified();
+    cb.fileSize = savedInfo.size();
+    m_cachedBeatmaps.insert(savedInfo.absoluteFilePath(), cb);
+
     qDebug() << "[BeatmapManager] Успешно экспортирована карта:" << outBkeyPath;
     return true;
+}
+
+void BeatmapManager::invalidateCache()
+{
+    m_cachedBeatmaps.clear();
+}
+
+void BeatmapManager::updateCachedBeatmap(const QString &bkeyFilePath, const Beatmap &beatmap)
+{
+    QFileInfo fi(bkeyFilePath);
+    if (fi.exists()) {
+        CachedBeatmap cb;
+        cb.map = beatmap;
+        cb.lastModified = fi.lastModified();
+        cb.fileSize = fi.size();
+        m_cachedBeatmaps.insert(fi.absoluteFilePath(), cb);
+    }
 }

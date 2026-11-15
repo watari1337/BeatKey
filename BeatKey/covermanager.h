@@ -67,6 +67,17 @@ public:
                                   QString *errorMessage = nullptr);
 
     /**
+     * @brief Проверяет внутреннюю структуру байтов аудиофайла (.mp3, .wav, .ogg).
+     * @param data Байтовый массив файла.
+     * @param extensionHint Расширение файла без точки ("mp3", "wav", "ogg").
+     * @param errorMessage Опциональный указатель для возврата читаемого текста ошибки.
+     * @return true, если данные соответствуют реальному валидному аудиопотоку.
+     */
+    static bool validateAudioData(const QByteArray &data,
+                                  const QString &extensionHint,
+                                  QString *errorMessage = nullptr);
+
+    /**
      * @brief Отображает модальное окно уведомления об ошибке файла с кнопкой «ОК» в стиле игры.
      * @param parent Родительский виджет.
      * @param title Заголовок окна.

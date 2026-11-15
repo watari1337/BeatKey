@@ -172,6 +172,8 @@ namespace Colors {
     QString pauseCenterCardStyle();
     QString pauseGlassCardStyle();
     QString checkBoxStyle();
+    QString statusLabelSuccessStyle();
+    QString statusLabelErrorStyle();
 }
 
 /**

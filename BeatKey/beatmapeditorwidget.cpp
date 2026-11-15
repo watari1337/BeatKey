@@ -7,6 +7,7 @@
 #include "editorhelpdialog.h"
 #include "theme.h"
 #include "covermanager.h"
+#include "songselectwidget.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -120,6 +121,11 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
             this, &BeatmapEditorWidget::updateAudioVolumes);
     connect(&SettingsManager::instance(), &SettingsManager::musicVolumeChanged,
             this, &BeatmapEditorWidget::updateAudioVolumes);
+    connect(m_mediaPlayer, &QMediaPlayer::mediaStatusChanged, this, [this](QMediaPlayer::MediaStatus status) {
+        if (status == QMediaPlayer::LoadedMedia || status == QMediaPlayer::BufferedMedia) {
+            updateAudioVolumes();
+        }
+    });
 
     m_playbackTimer->setTimerType(Qt::PreciseTimer);
     connect(m_playbackTimer, &QTimer::timeout, this, &BeatmapEditorWidget::updatePlaybackTick);
@@ -205,10 +211,8 @@ BeatmapEditorWidget::~BeatmapEditorWidget()
 
 void BeatmapEditorWidget::updateAudioVolumes()
 {
-    float master = SettingsManager::instance().masterVolume() / 100.0f;
-    float music = SettingsManager::instance().musicVolume() / 100.0f;
     if (m_audioOutput) {
-        m_audioOutput->setVolume(std::clamp(master * music, 0.0f, 1.0f));
+        m_audioOutput->setVolume(SettingsManager::instance().effectiveMusicVolume());
     }
 }
 
@@ -1454,9 +1458,13 @@ bool BeatmapEditorWidget::maybeSaveAndExit()
                 QMessageBox::warning(this, QStringLiteral("Ошибка проверки структуры карты"), validationError);
                 return false;
             }
-            handleSaveMap();
-            emit backRequested();
-            return true;
+            bool saved = handleSaveMap();
+            if (saved) {
+                emit backRequested();
+                return true;
+            }
+            // Сохранение не удалось: остаемся в редакторе, предотвращая потерю изменений
+            return false;
         } else if (dialog.promptResult() == SavePromptDialog::Result::Discard) {
             emit backRequested();
             return true;
@@ -1657,6 +1665,7 @@ void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &aud
     if (!m_sourceAudioPath.isEmpty() && QFile::exists(m_sourceAudioPath)) {
         m_mediaPlayer->setSource(QUrl::fromLocalFile(m_sourceAudioPath));
         m_waveform->load(m_sourceAudioPath);
+        updateAudioVolumes();
     } else {
         m_waveform->clear();
     }
@@ -1740,6 +1749,8 @@ void BeatmapEditorWidget::handlePlayPauseToggle()
             m_isAutoScrolling = false;
         }
 
+        m_mediaPlayer->setAudioOutput(m_audioOutput);
+        updateAudioVolumes();
         m_mediaPlayer->play();
     }
 }
@@ -2135,6 +2146,8 @@ void BeatmapEditorWidget::handleToggleTapRecord()
 
         // Turn on playback automatically
         if (m_mediaPlayer->playbackState() != QMediaPlayer::PlayingState) {
+            m_mediaPlayer->setAudioOutput(m_audioOutput);
+            updateAudioVolumes();
             m_mediaPlayer->play();
         }
     } else {
@@ -2352,8 +2365,10 @@ void BeatmapEditorWidget::handleChooseAudio()
     // Load new audio source into player and waveform decoder
     m_mediaPlayer->setSource(QUrl::fromLocalFile(filePath));
     m_waveform->load(filePath);
+    updateAudioVolumes();
 
     m_saveStatusLabel->setText(QStringLiteral("Аудиофайл карты обновлен!"));
+    m_saveStatusLabel->setStyleSheet(Theme::statusLabelSuccessStyle());
     m_saveStatusLabel->setVisible(true);
     QTimer::singleShot(2500, this, [this]() { m_saveStatusLabel->setVisible(false); });
     update();
@@ -2389,16 +2404,16 @@ bool BeatmapEditorWidget::validateMapData(QString *errorMessage)
         return false;
     }
 
-    QString audioExt = QFileInfo(m_sourceAudioPath).suffix().toLower();
-    if (audioExt != QStringLiteral("mp3") && audioExt != QStringLiteral("wav") && audioExt != QStringLiteral("ogg")) {
-        if (errorMessage) *errorMessage = QStringLiteral("Неподдерживаемый аудиоформат '%1'. Поддерживаются .mp3, .wav, .ogg.").arg(audioExt);
+    QString audioValidateErr;
+    if (!CoverManager::validateAudioFile(m_sourceAudioPath, &audioValidateErr)) {
+        if (errorMessage) *errorMessage = QStringLiteral("Аудиофайл карты поврежден или имеет некорректный формат: %1").arg(audioValidateErr);
         return false;
     }
 
     return true;
 }
 
-void BeatmapEditorWidget::handleSaveMap()
+bool BeatmapEditorWidget::handleSaveMap()
 {
     AudioManager::instance().playClickSound();
 
@@ -2406,9 +2421,9 @@ void BeatmapEditorWidget::handleSaveMap()
     if (!validateMapData(&validationError)) {
         QMessageBox::warning(this, QStringLiteral("Ошибка проверки структуры карты"), validationError);
         m_saveStatusLabel->setText(validationError);
-        m_saveStatusLabel->setStyleSheet(QStringLiteral("font-size: 11px; color: #e57388; font-weight: bold;"));
+        m_saveStatusLabel->setStyleSheet(Theme::statusLabelErrorStyle());
         m_saveStatusLabel->setVisible(true);
-        return;
+        return false;
     }
 
     QString outBkeyPath = m_currentBeatmap.bkeyFilePath;
@@ -2435,16 +2450,73 @@ void BeatmapEditorWidget::handleSaveMap()
         m_isMetadataModified = false;
         m_undoStack.setClean();
         m_saveStatusLabel->setText(QStringLiteral("Карта успешно сохранена!"));
-        m_saveStatusLabel->setStyleSheet(QStringLiteral("font-size: 11px; color: #2ecc71; font-weight: bold;"));
+        m_saveStatusLabel->setStyleSheet(Theme::statusLabelSuccessStyle());
         m_saveStatusLabel->setVisible(true);
         QTimer::singleShot(3500, this, [this]() {
             m_saveStatusLabel->setVisible(false);
         });
-    } else {
-        m_saveStatusLabel->setText(QStringLiteral("Ошибка сохранения: %1").arg(error));
-        m_saveStatusLabel->setStyleSheet(QStringLiteral("font-size: 11px; color: #e57388; font-weight: bold;"));
-        m_saveStatusLabel->setVisible(true);
+        return true;
     }
+
+    // Сохранение не удалось: информируем пользователя и предлагаем сохранить под новым именем
+    m_saveStatusLabel->setText(QStringLiteral("Ошибка сохранения: %1").arg(error));
+    m_saveStatusLabel->setStyleSheet(Theme::statusLabelErrorStyle());
+    m_saveStatusLabel->setVisible(true);
+
+    QMessageBox msgBox(this);
+    msgBox.setWindowTitle(QStringLiteral("Ошибка сохранения карты"));
+    msgBox.setText(QStringLiteral("Не удалось сохранить карту:\n%1\n\nЖелаете сохранить файл под другим именем?").arg(error));
+    msgBox.setIcon(QMessageBox::Warning);
+    QPushButton *saveAsBtn = msgBox.addButton(QStringLiteral("Сохранить как..."), QMessageBox::ActionRole);
+    QPushButton *cancelBtn = msgBox.addButton(QStringLiteral("Отмена"), QMessageBox::RejectRole);
+    Q_UNUSED(cancelBtn);
+    msgBox.setDefaultButton(saveAsBtn);
+    msgBox.exec();
+
+    if (msgBox.clickedButton() == saveAsBtn) {
+        QString songsDir = SongSelectWidget::songsDirectory();
+        QString newPath = QFileDialog::getSaveFileName(
+            this,
+            QStringLiteral("Сохранить карту под новым именем"),
+            songsDir,
+            QStringLiteral("Карта BeatKey (*.bkey)")
+        );
+        if (!newPath.isEmpty()) {
+            if (!newPath.endsWith(QStringLiteral(".bkey"), Qt::CaseInsensitive)) {
+                newPath += QStringLiteral(".bkey");
+            }
+            QString saveAsError;
+            bool savedAs = BeatmapManager::instance().exportToFile(
+                newPath,
+                m_currentBeatmap,
+                m_sourceAudioPath,
+                m_sourceCoverPath,
+                &saveAsError
+            );
+            if (savedAs) {
+                m_currentBeatmap.bkeyFilePath = newPath;
+                m_initialMeta = m_currentBeatmap.meta;
+                m_initialCoverPath = m_sourceCoverPath;
+                m_initialAudioPath = m_sourceAudioPath;
+                m_initialDurationMs = m_totalDurationMs;
+                m_isDurationManuallyEdited = false;
+                m_isMetadataModified = false;
+                m_undoStack.setClean();
+                m_saveStatusLabel->setText(QStringLiteral("Карта успешно сохранена!"));
+                m_saveStatusLabel->setStyleSheet(Theme::statusLabelSuccessStyle());
+                m_saveStatusLabel->setVisible(true);
+                QTimer::singleShot(3500, this, [this]() {
+                    m_saveStatusLabel->setVisible(false);
+                });
+                return true;
+            } else {
+                QMessageBox::critical(this, QStringLiteral("Ошибка сохранения"),
+                    QStringLiteral("Не удалось сохранить карту в файл:\n%1").arg(saveAsError));
+            }
+        }
+    }
+
+    return false;
 }
 
 void BeatmapEditorWidget::handleExportBkey()

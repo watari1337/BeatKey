@@ -5,8 +5,16 @@
 #include <QString>
 #include <QVector>
 #include <QStringList>
+#include <QMap>
+#include <QDateTime>
 
 #include "beatmap.h"
+
+struct CachedBeatmap {
+    Beatmap map;
+    QDateTime lastModified;
+    qint64 fileSize = 0;
+};
 
 /**
  * @brief BeatmapManager handles reading, validating, and exporting .bkey packages.
@@ -81,6 +89,8 @@ public:
     // ========================================================================
     QString cacheDirectory() const;
     void clearCache();
+    void invalidateCache();
+    void updateCachedBeatmap(const QString &bkeyFilePath, const Beatmap &beatmap);
 
 private:
     explicit BeatmapManager(QObject *parent = nullptr);
@@ -89,6 +99,7 @@ private:
     BeatmapManager& operator=(const BeatmapManager&) = delete;
 
     QString m_cacheDir;
+    QMap<QString, CachedBeatmap> m_cachedBeatmaps;
 };
 
 #endif // BEATMAPMANAGER_H

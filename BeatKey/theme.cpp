@@ -752,6 +752,28 @@ QString checkBoxStyle()
     );
 }
 
+QString statusLabelSuccessStyle()
+{
+    return QStringLiteral(
+        "font-family: 'Segoe UI', sans-serif;"
+        "font-size: 11px;"
+        "color: #2ecc71;"
+        "font-weight: bold;"
+        "background: transparent;"
+    );
+}
+
+QString statusLabelErrorStyle()
+{
+    return QStringLiteral(
+        "font-family: 'Segoe UI', sans-serif;"
+        "font-size: 11px;"
+        "color: #e57388;"
+        "font-weight: bold;"
+        "background: transparent;"
+    );
+}
+
 } // namespace Theme
 
 // ============================================================================

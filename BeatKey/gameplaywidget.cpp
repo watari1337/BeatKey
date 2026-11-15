@@ -546,9 +546,11 @@ void GameplayWidget::startMap(const Beatmap &beatmap)
     // Вступительная задержка в 1 секунду (1000 мс) перед стартом музыки:
     // Ноты уже двигаются с правого края экрана, чтобы игрок успел подготовиться к первым нотам
     m_isLeadIn = true;
+    m_audioStarted = false;
     m_leadInElapsedMs = 0;
     m_leadInClock.restart();
-    m_lastRenderedTrackTimeMs = -1000.0;
+    m_lastRenderedTrackTimeMs = -static_cast<double>(LEAD_IN_DURATION_MS);
+    m_frameClock.restart();
 
     m_gameLoopTimer->start();
     setFocus();
@@ -560,7 +562,7 @@ void GameplayWidget::pauseGame()
     cancelCountdown();
     if (m_isPaused || m_isFinished || m_isFailed) return;
 
-    if (m_isLeadIn) {
+    if (!m_audioStarted) {
         m_leadInElapsedMs += (m_leadInClock.isValid() ? m_leadInClock.elapsed() : 0);
         m_pausedElapsedMs = static_cast<double>(m_leadInElapsedMs - LEAD_IN_DURATION_MS);
     } else {
@@ -578,7 +580,7 @@ void GameplayWidget::resumeGame()
     if (!m_isPaused) return;
 
     m_isPaused = false;
-    if (m_isLeadIn) {
+    if (!m_audioStarted) {
         m_leadInClock.restart();
     } else {
         double offset = static_cast<double>(SettingsManager::instance().audioOffsetMs());
@@ -589,6 +591,7 @@ void GameplayWidget::resumeGame()
         m_lastRenderedTrackTimeMs = m_pausedElapsedMs;
         AudioManager::instance().resumeMusic();
     }
+    m_frameClock.restart();
     m_gameLoopTimer->start();
     update();
 }
@@ -603,6 +606,7 @@ void GameplayWidget::stopGame()
     m_isFinished = true;
     m_isPaused = false;
     m_isLeadIn = false;
+    m_audioStarted = false;
     m_leadInElapsedMs = 0;
     m_lastRenderedTrackTimeMs = -999999.0;
     m_clockBaseMs = 0;
@@ -621,16 +625,13 @@ double GameplayWidget::currentTrackTimePreciseMs() const
         return static_cast<double>(m_pausedElapsedMs);
     }
 
-    if (m_isLeadIn) {
+    if (!m_audioStarted) {
         double elapsed = static_cast<double>(m_leadInElapsedMs) +
             (m_leadInClock.isValid() ? (m_leadInClock.nsecsElapsed() / 1000000.0) : 0.0);
-        if (elapsed < static_cast<double>(LEAD_IN_DURATION_MS)) {
-            double cur = elapsed - static_cast<double>(LEAD_IN_DURATION_MS);
-            if (cur < m_lastRenderedTrackTimeMs) cur = m_lastRenderedTrackTimeMs;
-            m_lastRenderedTrackTimeMs = cur;
-            return cur;
-        }
-        return 0.0;
+        double cur = elapsed - static_cast<double>(LEAD_IN_DURATION_MS);
+        if (cur < m_lastRenderedTrackTimeMs) cur = m_lastRenderedTrackTimeMs;
+        m_lastRenderedTrackTimeMs = cur;
+        return cur;
     }
 
     double offset = static_cast<double>(SettingsManager::instance().audioOffsetMs());
@@ -658,7 +659,10 @@ double GameplayWidget::currentTrackTimePreciseMs() const
     }
 
     if (m_audioElapsedTimer.isValid()) {
-        return static_cast<double>(m_pausedElapsedMs + m_audioElapsedTimer.elapsed()) - offset;
+        double curTime = static_cast<double>(m_clockBaseMs + m_audioElapsedTimer.elapsed()) - offset;
+        if (curTime < m_lastRenderedTrackTimeMs) curTime = m_lastRenderedTrackTimeMs;
+        m_lastRenderedTrackTimeMs = curTime;
+        return curTime;
     }
     return 0.0;
 }
@@ -764,9 +768,15 @@ void GameplayWidget::onGameTick()
         return;
     }
 
-    if (m_isLeadIn) {
-        qint64 elapsed = m_leadInElapsedMs + (m_leadInClock.isValid() ? m_leadInClock.elapsed() : 0);
-        if (elapsed >= LEAD_IN_DURATION_MS) {
+    if (!m_audioStarted) {
+        double elapsed = static_cast<double>(m_leadInElapsedMs) + (m_leadInClock.isValid() ? (m_leadInClock.nsecsElapsed() / 1000000.0) : 0.0);
+        double curChartTime = elapsed - static_cast<double>(LEAD_IN_DURATION_MS);
+        double offset = static_cast<double>(SettingsManager::instance().audioOffsetMs());
+
+        // Музыка стартует точно тогда, когда chartTime достигает -offset,
+        // что устраняет любые скачки и телепортации первых нот
+        if (curChartTime >= -offset) {
+            m_audioStarted = true;
             m_isLeadIn = false;
             if (!m_beatmap.extractedAudioPath.isEmpty()) {
                 AudioManager::instance().stopMusic();
@@ -776,24 +786,46 @@ void GameplayWidget::onGameTick()
             m_lastMediaPos = -1;
             m_audioClock.restart();
             m_audioElapsedTimer.restart();
-            m_pausedElapsedMs = 0;
+            m_pausedElapsedMs = curChartTime;
         }
     }
 
     qint64 currentMs = currentTrackTimeMs();
 
-    if (!m_isLeadIn) {
-        checkAutoMisses(currentMs);
-        checkGameCompletion(currentMs);
+    checkAutoMisses(currentMs);
+    checkGameCompletion(currentMs);
+
+    // Расчет дельты времени кадра в миллисекундах для независимой от FPS плавной анимации
+    qreal dtMs = 0.0;
+    if (m_frameClock.isValid()) {
+        dtMs = m_frameClock.nsecsElapsed() / 1000000.0;
+        m_frameClock.restart();
+    } else {
+        m_frameClock.restart();
+    }
+    if (dtMs > 100.0) {
+        dtMs = 100.0;
     }
 
-    // Анимация всплывающих надписей точности
+    // Анимация всплывающих надписей точности (строго фиксированное время 800 мс на любых устройствах)
+    constexpr qreal TOTAL_LIFETIME_MS = 800.0;
+    constexpr qreal TOTAL_FLOAT_PX = 38.0;
+
     for (auto it = m_floatingJudgments.begin(); it != m_floatingJudgments.end(); ) {
-        it->yOffset += 1.8;
-        it->opacity -= 0.035;
-        if (it->opacity <= 0.0) {
+        it->elapsedMs += dtMs;
+        if (it->elapsedMs >= TOTAL_LIFETIME_MS) {
             it = m_floatingJudgments.erase(it);
         } else {
+            qreal p = it->elapsedMs / TOTAL_LIFETIME_MS;
+            // Плавное замедление подъема (ease-out)
+            it->yOffset = TOTAL_FLOAT_PX * (1.0 - (1.0 - p) * (1.0 - p));
+
+            // Первые 35% времени (~280 мс) надпись четкая и полностью непрозрачна, затем плавно угасает
+            if (p <= 0.35) {
+                it->opacity = 1.0;
+            } else {
+                it->opacity = qBound(0.0, 1.0 - ((p - 0.35) / 0.65), 1.0);
+            }
             ++it;
         }
     }
@@ -981,9 +1013,25 @@ void GameplayWidget::checkAutoMisses(qint64 currentMs)
 
 void GameplayWidget::checkGameCompletion(qint64 currentMs)
 {
-    // Игра длится до последней ноты плюс 2 секунды
-    if (m_lastNoteTimeMs > 0 && currentMs >= m_lastNoteTimeMs + 2000) {
+    bool allNotesProcessed = !m_notes.isEmpty();
+    for (const auto &note : m_notes) {
+        if (!note.isHit && !note.isMissed) {
+            allNotesProcessed = false;
+            break;
+        }
+    }
+
+    // Все ноты карты отработаны (включая карты из 1 ноты на 0.0с):
+    // даем 1.5 секунды на отображение эффектов попадания/промаха перед показом экрана победы
+    if (allNotesProcessed && currentMs >= m_lastNoteTimeMs + 1500) {
         finishGame(false);
+        return;
+    }
+
+    // Завершение раунда по окончании воспроизведения музыки
+    if (m_audioStarted && !AudioManager::instance().isMusicPlaying() && currentMs >= m_lastNoteTimeMs) {
+        finishGame(false);
+        return;
     }
 }
 
@@ -994,6 +1042,7 @@ void GameplayWidget::spawnFloatingJudgment(const QString &text, const QColor &co
     fj.color = color;
     fj.yOffset = 0.0;
     fj.opacity = 1.0;
+    fj.elapsedMs = 0.0;
     m_floatingJudgments.append(fj);
 }
 

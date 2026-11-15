@@ -338,7 +338,35 @@ void SongSelectWidget::refreshSongList()
     QString targetDir = songsDirectory();
 
     QStringList errors;
-    m_loadedBeatmaps = BeatmapManager::instance().loadAllFromDirectory(targetDir, &errors);
+    QVector<Beatmap> newMaps = BeatmapManager::instance().loadAllFromDirectory(targetDir, &errors);
+
+    bool mapsChanged = (newMaps.size() != m_loadedBeatmaps.size());
+    if (!mapsChanged) {
+        for (int i = 0; i < newMaps.size(); ++i) {
+            if (newMaps[i].id != m_loadedBeatmaps[i].id ||
+                newMaps[i].bkeyFilePath != m_loadedBeatmaps[i].bkeyFilePath) {
+                mapsChanged = true;
+                break;
+            }
+        }
+    }
+
+    if (!mapsChanged && m_songListWidget->count() == newMaps.size() && !newMaps.isEmpty()) {
+        int curRow = m_songListWidget->currentRow();
+        if (curRow >= 0 && curRow < m_loadedBeatmaps.size()) {
+            updateDetailsCard(m_loadedBeatmaps[curRow]);
+            if (!AudioManager::instance().isMusicPlaying()) {
+                playPreview(m_loadedBeatmaps[curRow]);
+            }
+        }
+        return;
+    }
+
+    int previousSelectedRow = m_songListWidget->currentRow();
+    QString previousSelectedBkey = (previousSelectedRow >= 0 && previousSelectedRow < m_loadedBeatmaps.size())
+        ? m_loadedBeatmaps[previousSelectedRow].bkeyFilePath : QString();
+
+    m_loadedBeatmaps = newMaps;
 
     {
         const QSignalBlocker blocker(m_songListWidget);
@@ -389,17 +417,27 @@ void SongSelectWidget::refreshSongList()
         }
 
         if (!m_loadedBeatmaps.isEmpty()) {
-            m_songListWidget->setCurrentRow(0);
-            selectSongSilently(0);
+            int targetRow = 0;
+            if (!previousSelectedBkey.isEmpty()) {
+                for (int i = 0; i < m_loadedBeatmaps.size(); ++i) {
+                    if (m_loadedBeatmaps[i].bkeyFilePath == previousSelectedBkey) {
+                        targetRow = i;
+                        break;
+                    }
+                }
+            }
+            m_songListWidget->setCurrentRow(targetRow);
+            selectSongSilently(targetRow);
         }
     }
 
     updateEmptyStateVisibility();
 
     if (!m_loadedBeatmaps.isEmpty()) {
-        m_songListWidget->scrollToTop();
-        updateDetailsCard(m_loadedBeatmaps[0]);
-        playPreview(m_loadedBeatmaps[0]);
+        int curRow = m_songListWidget->currentRow();
+        if (curRow < 0 || curRow >= m_loadedBeatmaps.size()) curRow = 0;
+        updateDetailsCard(m_loadedBeatmaps[curRow]);
+        playPreview(m_loadedBeatmaps[curRow]);
     } else {
         AudioManager::instance().playMenuMusic();
     }

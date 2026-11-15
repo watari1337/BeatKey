@@ -180,65 +180,225 @@ bool CoverManager::validateAudioFile(const QString &filePath, QString *errorMess
         return false;
     }
 
-    qint64 fileSize = fileInfo.size();
+    // Читаем первые 64 КБ для глубокого структурного анализа заголовков и фреймов
+    QByteArray sampleData = file.read(65536);
+    file.close();
 
-    if (ext == QStringLiteral("wav")) {
-        if (fileSize < 44) {
+    return validateAudioData(sampleData, ext, errorMessage);
+}
+
+bool CoverManager::validateAudioData(const QByteArray &data, const QString &extensionHint, QString *errorMessage)
+{
+    if (data.isEmpty() || data.size() < 16) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Аудиоданные повреждены или имеют слишком малый размер.");
+        }
+        return false;
+    }
+
+    // 1. Проверка на сигнатуры распространенных не-аудио форматов
+    // JPEG
+    if (data.size() >= 3 && static_cast<unsigned char>(data[0]) == 0xFF &&
+        static_cast<unsigned char>(data[1]) == 0xD8 && static_cast<unsigned char>(data[2]) == 0xFF) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Выбранный файл является изображением JPEG, а не аудиофайлом.");
+        }
+        return false;
+    }
+    // PNG
+    if (data.startsWith("\x89PNG\x0D\x0A\x1A\x0A")) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Выбранный файл является изображением PNG, а не аудиофайлом.");
+        }
+        return false;
+    }
+    // GIF
+    if (data.startsWith("GIF87a") || data.startsWith("GIF89a")) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Выбранный файл является изображением GIF, а не аудиофайлом.");
+        }
+        return false;
+    }
+    // PDF
+    if (data.startsWith("%PDF")) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Выбранный файл является документом PDF, а не аудиофайлом.");
+        }
+        return false;
+    }
+    // ZIP / PK
+    if (data.startsWith("PK\x03\x04")) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Выбранный файл является архивом ZIP, а не аудиофайлом.");
+        }
+        return false;
+    }
+    // Executable
+    if (data.startsWith("MZ")) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Выбранный файл является исполняемым файлом, а не аудиофайлом.");
+        }
+        return false;
+    }
+
+    QString ext = extensionHint.toLower();
+
+    // 2. Валидация формата WAV
+    if (ext == QStringLiteral("wav") || data.startsWith("RIFF") || data.startsWith("RIFX")) {
+        if (data.size() < 44) {
             if (errorMessage) {
                 *errorMessage = QStringLiteral("Файл WAV поврежден: размер файла слишком мал для заголовка.");
             }
             return false;
         }
-        QByteArray header = file.read(12);
-        if (header.size() < 12 || !header.startsWith("RIFF") || header.mid(8, 4) != "WAVE") {
+        if ((!data.startsWith("RIFF") && !data.startsWith("RIFX")) || data.mid(8, 4) != "WAVE") {
             if (errorMessage) {
-                *errorMessage = QStringLiteral("Файл имеет расширение .wav, но не содержит корректного заголовка RIFF WAVE или поврежден.");
+                *errorMessage = QStringLiteral("Файл не содержит корректного заголовка RIFF WAVE.");
             }
             return false;
         }
-    } else if (ext == QStringLiteral("ogg")) {
-        if (fileSize < 14) {
+        int fmtIdx = data.indexOf("fmt ");
+        if (fmtIdx < 0 || fmtIdx + 16 > data.size()) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Файл WAV не содержит информации о формате аудиопотока (чанк fmt).");
+            }
+            return false;
+        }
+        quint16 channels = *reinterpret_cast<const quint16*>(data.constData() + fmtIdx + 10);
+        quint32 sampleRate = *reinterpret_cast<const quint32*>(data.constData() + fmtIdx + 12);
+        if (channels == 0 || channels > 8 || sampleRate < 8000 || sampleRate > 192000) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Файл WAV содержит недопустимые параметры аудио (каналы или частота дискретизации).");
+            }
+            return false;
+        }
+        if (data.indexOf("data", fmtIdx + 16) < 0) {
+            if (errorMessage) {
+                *errorMessage = QStringLiteral("Файл WAV не содержит блока аудиоданных (чанк data).");
+            }
+            return false;
+        }
+        return true;
+    }
+
+    // 3. Валидация формата OGG
+    if (ext == QStringLiteral("ogg") || data.startsWith("OggS")) {
+        if (data.size() < 28) {
             if (errorMessage) {
                 *errorMessage = QStringLiteral("Файл Ogg поврежден: размер файла слишком мал.");
             }
             return false;
         }
-        QByteArray header = file.read(4);
-        if (header != "OggS") {
+        if (!data.startsWith("OggS") || static_cast<unsigned char>(data[4]) != 0) {
             if (errorMessage) {
-                *errorMessage = QStringLiteral("Файл имеет расширение .ogg, но не содержит корректного контейнера Ogg или поврежден.");
+                *errorMessage = QStringLiteral("Файл не содержит корректного контейнера Ogg.");
             }
             return false;
         }
-    } else if (ext == QStringLiteral("mp3")) {
-        if (fileSize < 64) {
+        QByteArray intro = data.left(250);
+        bool hasAudioCodec = intro.contains("\x01vorbis") || intro.contains("OpusHead") || intro.contains("\x7f" "FLAC");
+        if (!hasAudioCodec) {
             if (errorMessage) {
-                *errorMessage = QStringLiteral("Файл MP3 поврежден: размер файла слишком мал.");
+                *errorMessage = QStringLiteral("Файл Ogg не содержит поддерживаемого аудиокодека (Vorbis/Opus).");
             }
             return false;
         }
-        QByteArray chunk = file.read(4096);
-        bool hasId3 = chunk.startsWith("ID3");
-        bool hasMpegSync = false;
-        if (!hasId3) {
-            for (int i = 0; i < chunk.size() - 1; ++i) {
-                unsigned char b1 = static_cast<unsigned char>(chunk[i]);
-                unsigned char b2 = static_cast<unsigned char>(chunk[i + 1]);
-                if (b1 == 0xFF && (b2 & 0xE0) == 0xE0) {
-                    hasMpegSync = true;
+        return true;
+    }
+
+    // 4. Валидация формата MP3
+    if (ext == QStringLiteral("mp3") || data.startsWith("ID3") ||
+        (static_cast<unsigned char>(data[0]) == 0xFF && (static_cast<unsigned char>(data[1]) & 0xE0) == 0xE0)) {
+
+        int searchOffset = 0;
+        if (data.startsWith("ID3")) {
+            if (data.size() < 10) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("Файл MP3 содержит поврежденный заголовок ID3.");
+                }
+                return false;
+            }
+            unsigned char vMajor = static_cast<unsigned char>(data[3]);
+            if (vMajor == 0xFF) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("Некорректная версия ID3 тега.");
+                }
+                return false;
+            }
+            int tagSize = 10 + (((static_cast<unsigned char>(data[6]) & 0x7F) << 21)
+                             | ((static_cast<unsigned char>(data[7]) & 0x7F) << 14)
+                             | ((static_cast<unsigned char>(data[8]) & 0x7F) << 7)
+                             | (static_cast<unsigned char>(data[9]) & 0x7F));
+            searchOffset = tagSize;
+        }
+
+        int maxSearch = qMin(searchOffset + 32768, data.size() - 4);
+        bool foundValidMpegFrame = false;
+
+        for (int i = searchOffset; i < maxSearch; ++i) {
+            unsigned char b1 = static_cast<unsigned char>(data[i]);
+            unsigned char b2 = static_cast<unsigned char>(data[i + 1]);
+            if (b1 == 0xFF && (b2 & 0xE0) == 0xE0) {
+                int version = (b2 >> 3) & 0x03; // 00=2.5, 01=reserved, 10=2, 11=1
+                int layer   = (b2 >> 1) & 0x03; // 00=reserved, 01=III, 10=II, 11=I
+                if (version == 1 || layer == 0) {
+                    continue;
+                }
+
+                unsigned char b3 = static_cast<unsigned char>(data[i + 2]);
+                int bitrateIdx = (b3 >> 4) & 0x0F;
+                int srateIdx   = (b3 >> 2) & 0x03;
+                if (bitrateIdx == 0 || bitrateIdx == 0x0F || srateIdx == 3) {
+                    continue;
+                }
+
+                static const int bitratesMpeg1L3[16] = {
+                    0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0
+                };
+                static const int bitratesMpeg2L3[16] = {
+                    0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0
+                };
+                static const int sampleRatesMpeg1[4] = { 44100, 48000, 32000, 0 };
+                static const int sampleRatesMpeg2[4] = { 22050, 24000, 16000, 0 };
+
+                int bitrate = (version == 3) ? bitratesMpeg1L3[bitrateIdx] : bitratesMpeg2L3[bitrateIdx];
+                int srate = (version == 3) ? sampleRatesMpeg1[srateIdx] : sampleRatesMpeg2[srateIdx];
+                if (bitrate <= 0 || srate <= 0) {
+                    continue;
+                }
+
+                int padding = (b3 >> 1) & 1;
+                int frameLen = (version == 3 ? 144 : 72) * bitrate * 1000 / srate + padding;
+                if (frameLen < 24) continue;
+
+                int nextFramePos = i + frameLen;
+                if (nextFramePos + 2 < data.size()) {
+                    unsigned char nb1 = static_cast<unsigned char>(data[nextFramePos]);
+                    unsigned char nb2 = static_cast<unsigned char>(data[nextFramePos + 1]);
+                    if (nb1 == 0xFF && (nb2 & 0xE0) == 0xE0) {
+                        foundValidMpegFrame = true;
+                        break;
+                    }
+                } else {
+                    foundValidMpegFrame = true;
                     break;
                 }
             }
         }
-        if (!hasId3 && !hasMpegSync) {
+
+        if (!foundValidMpegFrame) {
             if (errorMessage) {
-                *errorMessage = QStringLiteral("Файл имеет расширение .mp3, но не содержит корректных аудиофреймов MP3 или поврежден.");
+                *errorMessage = QStringLiteral("Файл имеет расширение .mp3, но не содержит корректных аудиофреймов MP3.");
             }
             return false;
         }
+        return true;
     }
 
-    return true;
+    if (errorMessage) {
+        *errorMessage = QStringLiteral("Формат файла не распознан как поддерживаемое аудио (.mp3, .wav, .ogg).");
+    }
+    return false;
 }
 
 void CoverManager::showMediaErrorDialog(QWidget *parent,

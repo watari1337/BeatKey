@@ -329,7 +329,35 @@ void EditorHubWidget::refreshMapList()
     QString targetDir = SongSelectWidget::songsDirectory();
 
     QStringList errors;
-    m_loadedBeatmaps = BeatmapManager::instance().loadAllFromDirectory(targetDir, &errors);
+    QVector<Beatmap> newMaps = BeatmapManager::instance().loadAllFromDirectory(targetDir, &errors);
+
+    bool mapsChanged = (newMaps.size() != m_loadedBeatmaps.size());
+    if (!mapsChanged) {
+        for (int i = 0; i < newMaps.size(); ++i) {
+            if (newMaps[i].id != m_loadedBeatmaps[i].id ||
+                newMaps[i].bkeyFilePath != m_loadedBeatmaps[i].bkeyFilePath) {
+                mapsChanged = true;
+                break;
+            }
+        }
+    }
+
+    if (!mapsChanged && m_mapListWidget->count() == newMaps.size() && !newMaps.isEmpty()) {
+        int curRow = m_mapListWidget->currentRow();
+        if (curRow >= 0 && curRow < m_loadedBeatmaps.size()) {
+            updateDetailsCard(m_loadedBeatmaps[curRow]);
+            if (!AudioManager::instance().isMusicPlaying()) {
+                playPreview(m_loadedBeatmaps[curRow]);
+            }
+        }
+        return;
+    }
+
+    int previousSelectedRow = m_mapListWidget->currentRow();
+    QString previousSelectedBkey = (previousSelectedRow >= 0 && previousSelectedRow < m_loadedBeatmaps.size())
+        ? m_loadedBeatmaps[previousSelectedRow].bkeyFilePath : QString();
+
+    m_loadedBeatmaps = newMaps;
 
     {
         const QSignalBlocker blocker(m_mapListWidget);
@@ -380,17 +408,27 @@ void EditorHubWidget::refreshMapList()
         }
 
         if (!m_loadedBeatmaps.isEmpty()) {
-            m_mapListWidget->setCurrentRow(0);
-            selectMapSilently(0);
+            int targetRow = 0;
+            if (!previousSelectedBkey.isEmpty()) {
+                for (int i = 0; i < m_loadedBeatmaps.size(); ++i) {
+                    if (m_loadedBeatmaps[i].bkeyFilePath == previousSelectedBkey) {
+                        targetRow = i;
+                        break;
+                    }
+                }
+            }
+            m_mapListWidget->setCurrentRow(targetRow);
+            selectMapSilently(targetRow);
         }
     }
 
     updateEmptyStateVisibility();
 
     if (!m_loadedBeatmaps.isEmpty()) {
-        m_mapListWidget->scrollToTop();
-        updateDetailsCard(m_loadedBeatmaps[0]);
-        playPreview(m_loadedBeatmaps[0]);
+        int curRow = m_mapListWidget->currentRow();
+        if (curRow < 0 || curRow >= m_loadedBeatmaps.size()) curRow = 0;
+        updateDetailsCard(m_loadedBeatmaps[curRow]);
+        playPreview(m_loadedBeatmaps[curRow]);
     } else {
         AudioManager::instance().playMenuMusic();
     }

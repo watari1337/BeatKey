@@ -112,7 +112,7 @@ private slots:
     void handleChooseAudio();
 
     // Actions & Export
-    void handleSaveMap();
+    bool handleSaveMap();
     void handleExportBkey();
     void handleDeleteSelection();
     void handleUndo();

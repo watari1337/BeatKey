@@ -250,12 +250,8 @@ void AudioManager::playHoverSound()
 void AudioManager::updateVolumes()
 {
     auto &settings = SettingsManager::instance();
-    float master = settings.masterVolume() / 100.0f;
-    float music  = settings.musicVolume() / 100.0f;
-    float sfx    = settings.sfxVolume() / 100.0f;
-
-    float effectiveMusic = std::clamp(master * music, 0.0f, 1.0f);
-    float effectiveSfx   = std::clamp(master * sfx, 0.0f, 1.0f);
+    float effectiveMusic = settings.effectiveMusicVolume();
+    float effectiveSfx   = settings.effectiveSfxVolume();
 
     if (m_musicOutput) {
         m_musicOutput->setVolume(effectiveMusic);

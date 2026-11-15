@@ -184,6 +184,20 @@ void SettingsManager::setSfxVolume(int volume)
     }
 }
 
+float SettingsManager::effectiveMusicVolume() const
+{
+    float master = m_masterVolume / 100.0f;
+    float music = m_musicVolume / 100.0f;
+    return std::clamp(master * music, 0.0f, 1.0f);
+}
+
+float SettingsManager::effectiveSfxVolume() const
+{
+    float master = m_masterVolume / 100.0f;
+    float sfx = m_sfxVolume / 100.0f;
+    return std::clamp(master * sfx, 0.0f, 1.0f);
+}
+
 int SettingsManager::audioOffsetMs() const { return m_audioOffsetMs; }
 void SettingsManager::setAudioOffsetMs(int offsetMs)
 {

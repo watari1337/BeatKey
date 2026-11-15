@@ -474,10 +474,12 @@ bool NewBeatmapDialog::validateForm()
     bool hasErrors = false;
 
     // 1. Audio validation
-    if (m_selectedAudioPath.isEmpty() || !QFileInfo::exists(m_selectedAudioPath)) {
+    QString audioValidateErr;
+    if (m_selectedAudioPath.isEmpty() || !QFileInfo::exists(m_selectedAudioPath) ||
+        !CoverManager::validateAudioFile(m_selectedAudioPath, &audioValidateErr)) {
         m_chooseAudioBtn->setStyleSheet(Theme::errorButtonStyle());
-        m_audioPathLabel->setText(QStringLiteral("Файл не выбран!"));
-        m_audioPathLabel->setStyleSheet(QStringLiteral("color: #e57388; font-size: 12px; font-weight: normal;"));
+        m_audioPathLabel->setText(m_selectedAudioPath.isEmpty() ? QStringLiteral("Файл не выбран!") : QStringLiteral("Некорректный аудиофайл!"));
+        m_audioPathLabel->setStyleSheet(Theme::statusLabelErrorStyle());
         hasErrors = true;
     } else {
         m_chooseAudioBtn->setStyleSheet(Theme::secondaryButtonStyle());

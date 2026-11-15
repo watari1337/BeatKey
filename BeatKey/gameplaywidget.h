@@ -42,6 +42,7 @@ struct FloatingJudgment {
     QColor color;
     qreal yOffset = 0.0;
     qreal opacity = 1.0;
+    qreal elapsedMs = 0.0;
 };
 
 /**
@@ -170,6 +171,7 @@ private:
 
     // Вступительная задержка (1 секунда до старта музыки со свободным движением нот)
     bool m_isLeadIn = false;
+    bool m_audioStarted = false;
     qint64 m_leadInElapsedMs = 0;
     QElapsedTimer m_leadInClock;
     static constexpr qint64 LEAD_IN_DURATION_MS = 1000;
@@ -179,6 +181,7 @@ private:
     QTimer *m_countdownTimer = nullptr;
     QElapsedTimer m_audioElapsedTimer;
     mutable QElapsedTimer m_audioClock;
+    QElapsedTimer m_frameClock;
     mutable qint64 m_clockBaseMs = 0;
     mutable qint64 m_lastMediaPos = -1;
     double m_pausedElapsedMs = 0.0;
