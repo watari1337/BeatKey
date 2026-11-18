@@ -25,14 +25,16 @@ public:
     static constexpr int DEFAULT_MUSIC_VOLUME = 80;
     static constexpr int DEFAULT_SFX_VOLUME = 80;
     static constexpr int DEFAULT_AUDIO_OFFSET_MS = 0;
-    static constexpr int MIN_AUDIO_OFFSET_MS = -200;
-    static constexpr int MAX_AUDIO_OFFSET_MS = 200;
+    static constexpr int MIN_AUDIO_OFFSET_MS = -1000;
+    static constexpr int MAX_AUDIO_OFFSET_MS = 1000;
     static constexpr Qt::Key DEFAULT_PRIMARY_KEY = Qt::Key_D;
     static constexpr Qt::Key DEFAULT_SECONDARY_KEY = Qt::Key_K;
     static inline const QString DEFAULT_NICKNAME = QStringLiteral("Player");
     static constexpr bool DEFAULT_FULLSCREEN = false;
     static constexpr int DEFAULT_BG_DIM_PERCENT = 50;
     static constexpr int DEFAULT_BG_BLUR_RADIUS = 0;
+    static constexpr int DEFAULT_BG_DESAT_PERCENT = 0;
+    static constexpr int DEFAULT_BG_VIGNETTE_PERCENT = 50;
 
     // Load / Save
     void loadSettings();
@@ -81,6 +83,12 @@ public:
     int bgBlurRadius() const;
     void setBgBlurRadius(int radius);
 
+    int bgDesatPercent() const;
+    void setBgDesatPercent(int percent);
+
+    int bgVignettePercent() const;
+    void setBgVignettePercent(int percent);
+
     // Editor Settings
     bool editorHitsoundsEnabled() const;
     void setEditorHitsoundsEnabled(bool enabled);
@@ -102,6 +110,8 @@ signals:
     void fullscreenChanged(bool fullscreen);
     void bgDimPercentChanged(int percent);
     void bgBlurRadiusChanged(int radius);
+    void bgDesatPercentChanged(int percent);
+    void bgVignettePercentChanged(int percent);
     void editorHitsoundsEnabledChanged(bool enabled);
     void settingsReset();
     void settingsSaved();
@@ -127,6 +137,8 @@ private:
     int m_windowHeight;
     int m_bgDimPercent;
     int m_bgBlurRadius;
+    int m_bgDesatPercent;
+    int m_bgVignettePercent;
     bool m_editorHitsoundsEnabled;
 };
 

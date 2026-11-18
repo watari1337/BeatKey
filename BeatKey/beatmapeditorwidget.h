@@ -144,6 +144,7 @@ private:
     QString m_sourceAudioPath;
     QString m_sourceCoverPath;
     BeatmapMeta m_initialMeta;
+    BeatmapGameplay m_initialGameplay;
     QString m_initialCoverPath;
     QString m_initialAudioPath;
     int m_initialDurationMs;
@@ -232,6 +233,9 @@ private:
     QComboBox *m_metaDiffCombo;
     QDoubleSpinBox *m_metaBpmSpin;
     QSpinBox *m_metaOffsetSpin;
+    QSpinBox *m_metaPreviewTimeSpin;
+    QDoubleSpinBox *m_metaScrollSpeedSpin;
+    QDoubleSpinBox *m_metaHpDrainSpin;
     QSpinBox *m_metaDurationSpin;
     QPushButton *m_autoDurationBtn;
     QPushButton *m_metaChooseCoverBtn;

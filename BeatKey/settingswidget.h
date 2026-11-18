@@ -89,11 +89,6 @@ private:
 
     QComboBox *m_screenModeCombo;
 
-    QSlider *m_bgDimSlider;
-    QLabel *m_bgDimValLabel;
-    QSlider *m_bgBlurSlider;
-    QLabel *m_bgBlurValLabel;
-
     QPushButton *m_resetBtn;
     QPushButton *m_resetRecordsBtn;
     QPushButton *m_backBtn;

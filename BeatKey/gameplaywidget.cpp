@@ -318,6 +318,8 @@ private:
             connect(slider, &QSlider::valueChanged, m_bgCard, [this, lbl](int v) {
                 lbl->setText(QStringLiteral("Приглушение цвета: %1%").arg(v));
                 m_gameplay->setBgDesatPercent(v);
+                SettingsManager::instance().setBgDesatPercent(v);
+                SettingsManager::instance().saveSettings();
                 if (!m_isDraggingBgSlider) {
                     setBgPreviewMode(true);
                 }
@@ -339,6 +341,8 @@ private:
             connect(slider, &QSlider::valueChanged, m_bgCard, [this, lbl](int v) {
                 lbl->setText(QStringLiteral("Виньетка: %1%").arg(v));
                 m_gameplay->setBgVignettePercent(v);
+                SettingsManager::instance().setBgVignettePercent(v);
+                SettingsManager::instance().saveSettings();
                 if (!m_isDraggingBgSlider) {
                     setBgPreviewMode(true);
                 }
@@ -537,6 +541,8 @@ void GameplayWidget::startMap(const Beatmap &beatmap)
 
     m_bgDimPercent = SettingsManager::instance().bgDimPercent();
     m_bgBlurRadius = SettingsManager::instance().bgBlurRadius();
+    m_bgDesatPercent = SettingsManager::instance().bgDesatPercent();
+    m_bgVignettePercent = SettingsManager::instance().bgVignettePercent();
 
     loadNoteTexture();
     loadHitTargetTexture();
@@ -840,9 +846,11 @@ void GameplayWidget::loadNoteTexture()
     // Поиск пользовательского скина в каталогах assets/
     QString appDir = QCoreApplication::applicationDirPath();
     QStringList candidates = {
+        appDir + QStringLiteral("/assets/game_note.png"),
         appDir + QStringLiteral("/assets/note.png"),
         appDir + QStringLiteral("/assets/skins/note.png"),
         appDir + QStringLiteral("/assets/images/game_note.png"),
+        QDir::currentPath() + QStringLiteral("/assets/game_note.png"),
         QDir::currentPath() + QStringLiteral("/assets/note.png"),
         QStringLiteral(":/assets/images/game_note.png")
     };

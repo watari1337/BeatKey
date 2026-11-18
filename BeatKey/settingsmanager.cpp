@@ -25,6 +25,8 @@ SettingsManager::SettingsManager(QObject *parent)
     , m_windowHeight(720)
     , m_bgDimPercent(DEFAULT_BG_DIM_PERCENT)
     , m_bgBlurRadius(DEFAULT_BG_BLUR_RADIUS)
+    , m_bgDesatPercent(DEFAULT_BG_DESAT_PERCENT)
+    , m_bgVignettePercent(DEFAULT_BG_VIGNETTE_PERCENT)
     , m_editorHitsoundsEnabled(true)
 {
     QString appDir = QCoreApplication::applicationDirPath();
@@ -74,6 +76,8 @@ void SettingsManager::loadSettings()
     // Graphics Background Display
     m_bgDimPercent = std::clamp(settings.value(QStringLiteral("Graphics/BgDim"), DEFAULT_BG_DIM_PERCENT).toInt(), 0, 100);
     m_bgBlurRadius = std::clamp(settings.value(QStringLiteral("Graphics/BgBlur"), DEFAULT_BG_BLUR_RADIUS).toInt(), 0, 20);
+    m_bgDesatPercent = std::clamp(settings.value(QStringLiteral("Graphics/BgDesat"), DEFAULT_BG_DESAT_PERCENT).toInt(), 0, 100);
+    m_bgVignettePercent = std::clamp(settings.value(QStringLiteral("Graphics/BgVignette"), DEFAULT_BG_VIGNETTE_PERCENT).toInt(), 0, 100);
 
     // Editor Settings
     m_editorHitsoundsEnabled = settings.value(QStringLiteral("Editor/HitsoundsEnabled"), true).toBool();
@@ -105,6 +109,8 @@ void SettingsManager::saveSettings()
 
     settings.setValue(QStringLiteral("Graphics/BgDim"), m_bgDimPercent);
     settings.setValue(QStringLiteral("Graphics/BgBlur"), m_bgBlurRadius);
+    settings.setValue(QStringLiteral("Graphics/BgDesat"), m_bgDesatPercent);
+    settings.setValue(QStringLiteral("Graphics/BgVignette"), m_bgVignettePercent);
     settings.setValue(QStringLiteral("Editor/HitsoundsEnabled"), m_editorHitsoundsEnabled);
 
     settings.sync();
@@ -126,6 +132,8 @@ void SettingsManager::resetToDefaults()
     m_windowHeight = 720;
     m_bgDimPercent = DEFAULT_BG_DIM_PERCENT;
     m_bgBlurRadius = DEFAULT_BG_BLUR_RADIUS;
+    m_bgDesatPercent = DEFAULT_BG_DESAT_PERCENT;
+    m_bgVignettePercent = DEFAULT_BG_VIGNETTE_PERCENT;
     m_editorHitsoundsEnabled = true;
 
     saveSettings();
@@ -137,6 +145,8 @@ void SettingsManager::resetToDefaults()
     emit audioOffsetChanged(m_audioOffsetMs);
     emit bgDimPercentChanged(m_bgDimPercent);
     emit bgBlurRadiusChanged(m_bgBlurRadius);
+    emit bgDesatPercentChanged(m_bgDesatPercent);
+    emit bgVignettePercentChanged(m_bgVignettePercent);
     emit editorHitsoundsEnabledChanged(m_editorHitsoundsEnabled);
     emit keyBindingsChanged(m_primaryKey, m_secondaryKey);
     emit fullscreenChanged(m_fullscreen);
@@ -410,6 +420,34 @@ void SettingsManager::setBgBlurRadius(int radius)
     if (m_bgBlurRadius != radius) {
         m_bgBlurRadius = radius;
         emit bgBlurRadiusChanged(m_bgBlurRadius);
+    }
+}
+
+int SettingsManager::bgDesatPercent() const
+{
+    return m_bgDesatPercent;
+}
+
+void SettingsManager::setBgDesatPercent(int percent)
+{
+    percent = std::clamp(percent, 0, 100);
+    if (m_bgDesatPercent != percent) {
+        m_bgDesatPercent = percent;
+        emit bgDesatPercentChanged(m_bgDesatPercent);
+    }
+}
+
+int SettingsManager::bgVignettePercent() const
+{
+    return m_bgVignettePercent;
+}
+
+void SettingsManager::setBgVignettePercent(int percent)
+{
+    percent = std::clamp(percent, 0, 100);
+    if (m_bgVignettePercent != percent) {
+        m_bgVignettePercent = percent;
+        emit bgVignettePercentChanged(m_bgVignettePercent);
     }
 }
 

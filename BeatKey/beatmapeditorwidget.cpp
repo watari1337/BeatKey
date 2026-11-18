@@ -30,10 +30,10 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     : QWidget(parent)
     , m_initialDurationMs(0)
     , m_isDurationManuallyEdited(false)
-    , m_backgroundDimPercent(50)
-    , m_backgroundBlurRadius(0)
-    , m_desaturationPercent(0)
-    , m_vignettePercent(50)
+    , m_backgroundDimPercent(SettingsManager::instance().bgDimPercent())
+    , m_backgroundBlurRadius(SettingsManager::instance().bgBlurRadius())
+    , m_desaturationPercent(SettingsManager::instance().bgDesatPercent())
+    , m_vignettePercent(SettingsManager::instance().bgVignettePercent())
     , m_audioDurationMs(120000)
     , m_totalDurationMs(120000)
     , m_isScrubbing(false)
@@ -90,6 +90,9 @@ BeatmapEditorWidget::BeatmapEditorWidget(QWidget *parent)
     , m_metaDiffCombo(nullptr)
     , m_metaBpmSpin(nullptr)
     , m_metaOffsetSpin(nullptr)
+    , m_metaPreviewTimeSpin(nullptr)
+    , m_metaScrollSpeedSpin(nullptr)
+    , m_metaHpDrainSpin(nullptr)
     , m_metaDurationSpin(nullptr)
     , m_autoDurationBtn(nullptr)
     , m_metaChooseCoverBtn(nullptr)
@@ -276,6 +279,7 @@ void BeatmapEditorWidget::updateCachedBackground()
     }
 
     // Desaturation: Blend RGB toward Greyscale
+    m_desaturationPercent = SettingsManager::instance().bgDesatPercent();
     if (m_desaturationPercent > 0) {
         img = img.convertToFormat(QImage::Format_ARGB32_Premultiplied);
         int desatFactor = qBound(0, m_desaturationPercent, 100);
@@ -320,6 +324,7 @@ void BeatmapEditorWidget::paintEvent(QPaintEvent *event)
         }
 
         // 2. Cinematic Vignette (Radial gradient focusing attention on center)
+        m_vignettePercent = SettingsManager::instance().bgVignettePercent();
         if (m_vignettePercent > 0) {
             double vigStrength = m_vignettePercent / 100.0;
             QRadialGradient radial(rect().center(), qMax(width(), height()) * 0.72);
@@ -1323,6 +1328,71 @@ QWidget* BeatmapEditorWidget::createDescriptionPage()
 
     durCol->addLayout(durControlRow);
     formLayout->addLayout(durCol);
+
+    // Gameplay & Preview Section
+    auto *previewLbl = new QLabel(QStringLiteral("Отметка предпрослушивания (Preview Time):"), rightCard);
+    previewLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    m_metaPreviewTimeSpin = new QSpinBox(rightCard);
+    m_metaPreviewTimeSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_metaPreviewTimeSpin->setRange(0, 3600000);
+    m_metaPreviewTimeSpin->setSuffix(QStringLiteral(" мс"));
+    m_metaPreviewTimeSpin->setSingleStep(1000);
+    m_metaPreviewTimeSpin->setValue(0);
+    m_metaPreviewTimeSpin->setAlignment(Qt::AlignCenter);
+    m_metaPreviewTimeSpin->setStyleSheet(Theme::spinBoxStyle());
+    m_metaPreviewTimeSpin->setToolTip(QStringLiteral("Временная метка старта фрагмента предпрослушивания в меню выбора карт (в миллисекундах)"));
+    connect(m_metaPreviewTimeSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, [this](int val) {
+        m_currentBeatmap.meta.previewTimeMs = val;
+        m_isMetadataModified = true;
+    });
+    formLayout->addWidget(previewLbl);
+    formLayout->addWidget(m_metaPreviewTimeSpin);
+
+    // Scroll Speed & HP Drain Multipliers Row
+    auto *gameplayRow = new QHBoxLayout();
+    gameplayRow->setSpacing(14);
+
+    auto *speedCol = new QVBoxLayout();
+    auto *speedLbl = new QLabel(QStringLiteral("Скорость прокрутки:"), rightCard);
+    speedLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    m_metaScrollSpeedSpin = new QDoubleSpinBox(rightCard);
+    m_metaScrollSpeedSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_metaScrollSpeedSpin->setRange(0.5, 3.0);
+    m_metaScrollSpeedSpin->setSingleStep(0.1);
+    m_metaScrollSpeedSpin->setDecimals(1);
+    m_metaScrollSpeedSpin->setValue(1.0);
+    m_metaScrollSpeedSpin->setAlignment(Qt::AlignCenter);
+    m_metaScrollSpeedSpin->setStyleSheet(Theme::spinBoxStyle());
+    m_metaScrollSpeedSpin->setToolTip(QStringLiteral("Множитель скорости движения нот по дорожке (от 0.5 до 3.0, по умолчанию 1.0)"));
+    connect(m_metaScrollSpeedSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double val) {
+        m_currentBeatmap.gameplay.scrollSpeed = val;
+        m_isMetadataModified = true;
+    });
+    speedCol->addWidget(speedLbl);
+    speedCol->addWidget(m_metaScrollSpeedSpin);
+    gameplayRow->addLayout(speedCol, 1);
+
+    auto *hpCol = new QVBoxLayout();
+    auto *hpLbl = new QLabel(QStringLiteral("Расход здоровья (HP Drain):"), rightCard);
+    hpLbl->setStyleSheet(Theme::secondaryLabelStyle());
+    m_metaHpDrainSpin = new QDoubleSpinBox(rightCard);
+    m_metaHpDrainSpin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    m_metaHpDrainSpin->setRange(0.1, 5.0);
+    m_metaHpDrainSpin->setSingleStep(0.1);
+    m_metaHpDrainSpin->setDecimals(1);
+    m_metaHpDrainSpin->setValue(1.0);
+    m_metaHpDrainSpin->setAlignment(Qt::AlignCenter);
+    m_metaHpDrainSpin->setStyleSheet(Theme::spinBoxStyle());
+    m_metaHpDrainSpin->setToolTip(QStringLiteral("Множитель расхода здоровья при промахах (по умолчанию 1.0)"));
+    connect(m_metaHpDrainSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), this, [this](double val) {
+        m_currentBeatmap.gameplay.hpDrainRate = val;
+        m_isMetadataModified = true;
+    });
+    hpCol->addWidget(hpLbl);
+    hpCol->addWidget(m_metaHpDrainSpin);
+    gameplayRow->addLayout(hpCol, 1);
+
+    formLayout->addLayout(gameplayRow);
     formLayout->addStretch(1);
 
     cardsRow->addWidget(rightCard);
@@ -1432,6 +1502,9 @@ bool BeatmapEditorWidget::isMetadataModified() const
     if (m_currentBeatmap.meta.difficultyName != m_initialMeta.difficultyName) return true;
     if (qAbs(m_currentBeatmap.meta.bpm - m_initialMeta.bpm) > 0.001) return true;
     if (m_currentBeatmap.meta.audioOffset != m_initialMeta.audioOffset) return true;
+    if (m_currentBeatmap.meta.previewTimeMs != m_initialMeta.previewTimeMs) return true;
+    if (qAbs(m_currentBeatmap.gameplay.scrollSpeed - m_initialGameplay.scrollSpeed) > 0.001) return true;
+    if (qAbs(m_currentBeatmap.gameplay.hpDrainRate - m_initialGameplay.hpDrainRate) > 0.001) return true;
     if (m_sourceCoverPath != m_initialCoverPath) return true;
     if (m_sourceAudioPath != m_initialAudioPath) return true;
     if (m_isDurationManuallyEdited && m_initialDurationMs > 0 && m_totalDurationMs != m_initialDurationMs) return true;
@@ -1616,6 +1689,24 @@ void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &aud
         m_sideDurationSpin->blockSignals(false);
     }
 
+    if (m_metaPreviewTimeSpin) {
+        m_metaPreviewTimeSpin->blockSignals(true);
+        m_metaPreviewTimeSpin->setValue(m_currentBeatmap.meta.previewTimeMs);
+        m_metaPreviewTimeSpin->blockSignals(false);
+    }
+
+    if (m_metaScrollSpeedSpin) {
+        m_metaScrollSpeedSpin->blockSignals(true);
+        m_metaScrollSpeedSpin->setValue(m_currentBeatmap.gameplay.scrollSpeed);
+        m_metaScrollSpeedSpin->blockSignals(false);
+    }
+
+    if (m_metaHpDrainSpin) {
+        m_metaHpDrainSpin->blockSignals(true);
+        m_metaHpDrainSpin->setValue(m_currentBeatmap.gameplay.hpDrainRate);
+        m_metaHpDrainSpin->blockSignals(false);
+    }
+
     if (m_speedCombo) {
         int idx = m_speedCombo->findData(1.0);
         if (idx >= 0) {
@@ -1689,6 +1780,7 @@ void BeatmapEditorWidget::loadBeatmap(const Beatmap &beatmap, const QString &aud
     updateStats();
 
     m_initialMeta = m_currentBeatmap.meta;
+    m_initialGameplay = m_currentBeatmap.gameplay;
     m_initialCoverPath = m_sourceCoverPath;
     m_initialAudioPath = m_sourceAudioPath;
     m_initialDurationMs = m_totalDurationMs;
@@ -2443,6 +2535,7 @@ bool BeatmapEditorWidget::handleSaveMap()
 
     if (ok) {
         m_initialMeta = m_currentBeatmap.meta;
+    m_initialGameplay = m_currentBeatmap.gameplay;
         m_initialCoverPath = m_sourceCoverPath;
         m_initialAudioPath = m_sourceAudioPath;
         m_initialDurationMs = m_totalDurationMs;
@@ -2496,6 +2589,7 @@ bool BeatmapEditorWidget::handleSaveMap()
             if (savedAs) {
                 m_currentBeatmap.bkeyFilePath = newPath;
                 m_initialMeta = m_currentBeatmap.meta;
+    m_initialGameplay = m_currentBeatmap.gameplay;
                 m_initialCoverPath = m_sourceCoverPath;
                 m_initialAudioPath = m_sourceAudioPath;
                 m_initialDurationMs = m_totalDurationMs;
